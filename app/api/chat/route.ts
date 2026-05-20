@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   appendMessage,
+  consumeChatQuota,
   createChatSession,
   ensureUserProfile,
   getChatSession,
@@ -100,6 +101,17 @@ export async function POST(request: Request) {
     await ensureUserProfile(user);
     const body = await request.json();
     const payload = payloadSchema.parse(body);
+    const quota = await consumeChatQuota(user.uid);
+
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: copy[payload.language].rateLimitError,
+          resetAt: quota.resetAt,
+        },
+        { status: 429 },
+      );
+    }
 
     const warningLevel = detectMedicalWarning(payload.message);
     const warningText = getWarningCopy(payload.language, warningLevel)?.body ?? null;

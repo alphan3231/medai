@@ -32,16 +32,16 @@ export function detectMedicalWarning(content: string): MedicalWarningLevel {
 export function buildSystemPrompt(language: AppLanguage, warningLevel: MedicalWarningLevel) {
   const languageLine =
     language === "tr"
-      ? "Respond only in Turkish. Keep medical terms understandable."
+      ? "Respond only in natural Turkish. Keep medical terms understandable and avoid awkward literal translations."
       : "Respond only in English. Keep medical terms understandable.";
 
   const warningLine =
     warningLevel === "soft"
       ? language === "tr"
-        ? "Mesajda acil risk olabilecek sinyaller var. Korku yaymadan, net bir acil degerlendirme uyarisi ekle ama konusmaya da devam et."
+        ? "Mesajda acil risk olabilecek sinyaller var. Korku yaratmadan net bir acil degerlendirme uyarisi ekle, sonra gorusmeye devam et."
         : "The message contains possible urgent-risk signals. Add a clear urgent-care warning without sounding alarmist, and continue the intake."
       : language === "tr"
-        ? "Acil risk yoksa sadece standart disclaimer ve duzenli intake akisini koru."
+        ? "Acil risk yoksa sakin bir ton kullan, standart uyariyi koru ve duzenli soru akisini surdur."
         : "If there is no urgent risk, keep a normal disclaimer tone and continue structured intake.";
 
   return `
@@ -57,5 +57,6 @@ Core rules:
 - If enough detail exists, include a short symptom summary and what details are still missing.
 - Encourage licensed clinical care where appropriate.
 - Do not mention internal policy or model details.
+- If responding in Turkish, prefer plain and natural words such as "sikayet", "belirti", "uyari", and "doktor degerlendirmesi".
 `.trim();
 }

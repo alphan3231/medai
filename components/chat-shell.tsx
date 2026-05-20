@@ -347,6 +347,7 @@ export function ChatShell({
                   {t.send}
                 </Button>
               </div>
+              <p className="text-xs leading-5 text-[#748076]">{t.quotaHint}</p>
             </form>
           </div>
         </main>

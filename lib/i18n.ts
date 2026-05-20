@@ -39,6 +39,8 @@ type CopyShape = {
   authError: string;
   genericError: string;
   missingKeyError: string;
+  quotaHint: string;
+  rateLimitError: string;
 };
 
 export const copy: Record<AppLanguage, CopyShape> = {
@@ -91,27 +93,29 @@ export const copy: Record<AppLanguage, CopyShape> = {
     genericError: "Something went wrong. Please try again.",
     missingKeyError:
       "The server is missing OPENAI_API_KEY. Add it before using the chatbot.",
+    quotaHint: "Each account can send up to 5 messages per hour. Unused messages do not carry over.",
+    rateLimitError: "You have reached the 5-message hourly limit. Please wait before sending another message.",
   },
   tr: {
     appName: "MedAI",
-    appTitle: "Teshis numarasi yapmadan, duzenli intake.",
+    appTitle: "Tani koymadan, belirtileri duzenli toplar.",
     appSubtitle:
-      "Semptomlarini toparlar, riskli sinyalleri isaretler ve doktordan once duzenli bir kayit cikarir.",
-    intakeBadge: "Semptom Intake Asistani",
+      "Sikayetlerini toplar, riskli durumlari isaretler ve doktor gorusmesinden once duzenli bir kayit hazirlar.",
+    intakeBadge: "Semptom On Degerlendirme Asistani",
     disclaimer:
-      "MedAI sadece intake destegi icindir. Teshis koymaz, ilac onermez ve doktorun yerini tutmaz.",
-    featureOneTitle: "Yapilandirilmis takip",
+      "MedAI sadece on degerlendirme destegi icindir. Tani koymaz, ilac onermez ve doktorun yerini tutmaz.",
+    featureOneTitle: "Duzenli takip sorulari",
     featureOneBody:
-      "Asistan sonuca ziplamadan, intake mantiginda net takip sorulari sorar.",
-    featureTwoTitle: "Yumusak aciliyet sinyali",
+      "Asistan hemen sonuca atlamaz; durumu netlestirmek icin kisa ve yerinde sorular sorar.",
+    featureTwoTitle: "Olculu aciliyet uyarisi",
     featureTwoBody:
-      "Riskli semptom kaliplari warning uretir ama konusmayi kesmez.",
-    featureThreeTitle: "Iki dilli kayit",
+      "Riskli belirti kaliplari gorulurse uyari verir ama konusmayi yarida kesmez.",
+    featureThreeTitle: "Iki dilli kayitlar",
     featureThreeBody:
-      "Kaydedilen her intake kendi dilini ve tum gecmisini Firestore icinde korur.",
-    authTitle: "Guvenli intake alanina gir.",
+      "Her gorusme kendi dilini korur ve tum gecmisi Firestore uzerinde saklanir.",
+    authTitle: "Guvenli belirti kayit alanina gir.",
     authSubtitle:
-      "Semptom gecmisini hesabina baglamak icin email ve sifre kullan.",
+      "Belirti gecmisini hesabina baglamak icin email ve sifre kullan.",
     emailLabel: "Email",
     passwordLabel: "Sifre",
     signIn: "Giris yap",
@@ -119,28 +123,30 @@ export const copy: Record<AppLanguage, CopyShape> = {
     switchToSignIn: "Zaten hesabin var mi? Giris yap",
     switchToSignUp: "Hesabin yok mu? Hesap olustur",
     sidebarTitle: "Gecmis",
-    sidebarHint: "Her oturum kendi dilini ve warning durumunu korur.",
-    newChat: "Yeni intake",
+    sidebarHint: "Her gorusme kendi dilini ve uyari durumunu korur.",
+    newChat: "Yeni gorusme",
     signOut: "Cikis yap",
-    chatPlaceholder: "Bir oturum sec ya da sifirdan yeni intake baslat.",
+    chatPlaceholder: "Bir gorusme sec ya da sifirdan yeni bir kayit baslat.",
     composerPlaceholder:
-      "Ne hissettigini, ne zaman basladigini ve neyin arttirdigini ya da azalttigini yaz.",
+      "Ne hissettigini, ne zaman basladigini ve neyin artirip azalttigini yaz.",
     send: "Gonder",
-    sending: "Dusunuyor",
-    historyEmpty: "Henuz oturum yok. Ana semptomunla basla.",
+    sending: "Yanit hazirlaniyor",
+    historyEmpty: "Henuz gorusme yok. Ana sikayetinle basla.",
     startPrompt:
-      "Ana semptomunu, ne zaman basladigini ve acil hissettiren bir sey olup olmadigini yaz.",
+      "Ana sikayetini, ne zaman basladigini ve acil hissettiren bir durum olup olmadigini yaz.",
     introLabel: "MedAI nasil yanit verir",
-    sessionLabel: "oturum",
+    sessionLabel: "gorusme",
     userRole: "kullanici",
     assistantRole: "asistan",
     warningTitle: "Olasi acil durum sinyali",
     warningSoft:
-      "Bu durum acil tibbi degerlendirme gerektirebilir. Semptomlar siddetliyse veya kotulesiyorsa hemen acil yardim ya da doktor destegi al.",
+      "Bu tablo acil tibbi degerlendirme gerektirebilir. Sikayetler siddetliyse ya da hizla kotulesiyorsa vakit kaybetmeden acil yardim veya doktor destegi al.",
     authError: "Kimlik dogrulama basarisiz oldu. Email ve sifreyi kontrol edip tekrar dene.",
     genericError: "Bir sey ters gitti. Lutfen tekrar dene.",
     missingKeyError:
       "Sunucuda OPENAI_API_KEY ayarli degil. Chatbotu kullanmadan once ekle.",
+    quotaHint: "Her hesap saatte en fazla 5 mesaj gonderebilir. Kullanilmayan haklar birikmez.",
+    rateLimitError: "Saatlik 5 mesaj sinirina ulastin. Yeni mesaj gondermeden once biraz bekle.",
   },
 };
 

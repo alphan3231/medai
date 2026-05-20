@@ -23,6 +23,15 @@ function buildSummary(message: string) {
   return message.trim().slice(0, 120) || "Symptom intake in progress.";
 }
 
+const CHAT_QUOTA_LIMIT = 5;
+const CHAT_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+
+type ChatQuotaResult = {
+  allowed: boolean;
+  remaining: number;
+  resetAt: string;
+};
+
 export async function ensureUserProfile(user: { uid: string; email?: string | null }) {
   await adminDb.collection("users").doc(user.uid).set(
     {
@@ -32,6 +41,51 @@ export async function ensureUserProfile(user: { uid: string; email?: string | nu
     },
     { merge: true },
   );
+}
+
+export async function consumeChatQuota(userId: string): Promise<ChatQuotaResult> {
+  const ref = adminDb.collection("users").doc(userId).collection("rateLimits").doc("chatMessages");
+  const now = new Date();
+
+  return adminDb.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const data = snapshot.data();
+    const existingStart =
+      data?.windowStartedAt instanceof Timestamp ? data.windowStartedAt.toDate() : null;
+    const inCurrentWindow =
+      existingStart !== null && now.getTime() - existingStart.getTime() < CHAT_QUOTA_WINDOW_MS;
+    const windowStartedAt = inCurrentWindow ? existingStart : now;
+    const count = inCurrentWindow ? Number(data?.count ?? 0) : 0;
+    const resetAt = new Date(windowStartedAt.getTime() + CHAT_QUOTA_WINDOW_MS);
+
+    if (count >= CHAT_QUOTA_LIMIT) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: resetAt.toISOString(),
+      };
+    }
+
+    const nextCount = count + 1;
+
+    transaction.set(
+      ref,
+      {
+        count: nextCount,
+        limit: CHAT_QUOTA_LIMIT,
+        windowStartedAt: Timestamp.fromDate(windowStartedAt),
+        resetAt: Timestamp.fromDate(resetAt),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      allowed: true,
+      remaining: CHAT_QUOTA_LIMIT - nextCount,
+      resetAt: resetAt.toISOString(),
+    };
+  });
 }
 
 export async function listChatSessions(userId: string): Promise<ChatSession[]> {
