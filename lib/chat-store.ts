@@ -1,0 +1,227 @@
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
+
+import { adminDb } from "@/lib/firebase/admin";
+import type { AppLanguage, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
+
+function serializeDate(value: Timestamp | string | null | undefined) {
+  if (!value) {
+    return new Date(0).toISOString();
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return value.toDate().toISOString();
+}
+
+function buildTitle(message: string) {
+  return message.trim().slice(0, 52) || "New intake";
+}
+
+function buildSummary(message: string) {
+  return message.trim().slice(0, 120) || "Symptom intake in progress.";
+}
+
+export async function ensureUserProfile(user: { uid: string; email?: string | null }) {
+  await adminDb.collection("users").doc(user.uid).set(
+    {
+      email: user.email ?? null,
+      updatedAt: FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function listChatSessions(userId: string): Promise<ChatSession[]> {
+  const snapshot = await adminDb
+    .collection("chats")
+    .where("userId", "==", userId)
+    .orderBy("updatedAt", "desc")
+    .get();
+
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      userId: data.userId,
+      title: data.title,
+      summary: data.summary,
+      language: data.language,
+      warningLevel: data.warningLevel ?? "none",
+      lastMessagePreview: data.lastMessagePreview ?? "",
+      createdAt: serializeDate(data.createdAt),
+      updatedAt: serializeDate(data.updatedAt),
+    } satisfies ChatSession;
+  });
+}
+
+export async function getChatSession(userId: string, chatId: string): Promise<ChatSession | null> {
+  const doc = await adminDb.collection("chats").doc(chatId).get();
+  if (!doc.exists) {
+    return null;
+  }
+
+  const data = doc.data();
+  if (!data || data.userId !== userId) {
+    return null;
+  }
+
+  return {
+    id: doc.id,
+    userId: data.userId,
+    title: data.title,
+    summary: data.summary,
+    language: data.language,
+    warningLevel: data.warningLevel ?? "none",
+    lastMessagePreview: data.lastMessagePreview ?? "",
+    createdAt: serializeDate(data.createdAt),
+    updatedAt: serializeDate(data.updatedAt),
+  };
+}
+
+export async function getChatMessages(userId: string, chatId: string): Promise<ChatMessage[]> {
+  const session = await getChatSession(userId, chatId);
+  if (!session) {
+    return [];
+  }
+
+  const snapshot = await adminDb
+    .collection("chats")
+    .doc(chatId)
+    .collection("messages")
+    .orderBy("createdAt", "asc")
+    .get();
+
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      chatId,
+      userId: data.userId,
+      role: data.role,
+      content: data.content,
+      language: data.language,
+      warningLevel: data.warningLevel ?? "none",
+      warningText: data.warningText ?? null,
+      createdAt: serializeDate(data.createdAt),
+    } satisfies ChatMessage;
+  });
+}
+
+export async function getRecentMessages(userId: string, chatId: string, limit = 8) {
+  const session = await getChatSession(userId, chatId);
+  if (!session) {
+    return [];
+  }
+
+  const snapshot = await adminDb
+    .collection("chats")
+    .doc(chatId)
+    .collection("messages")
+    .orderBy("createdAt", "desc")
+    .limit(limit)
+    .get();
+
+  return snapshot.docs
+    .map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        chatId,
+        userId: data.userId,
+        role: data.role,
+        content: data.content,
+        language: data.language,
+        warningLevel: data.warningLevel ?? "none",
+        warningText: data.warningText ?? null,
+        createdAt: serializeDate(data.createdAt),
+      } satisfies ChatMessage;
+    })
+    .reverse();
+}
+
+export async function createChatSession({
+  userId,
+  language,
+  firstMessage,
+  warningLevel,
+}: {
+  userId: string;
+  language: AppLanguage;
+  firstMessage: string;
+  warningLevel: MedicalWarningLevel;
+}) {
+  const ref = adminDb.collection("chats").doc();
+  const payload = {
+    userId,
+    title: buildTitle(firstMessage),
+    summary: buildSummary(firstMessage),
+    language,
+    warningLevel,
+    lastMessagePreview: firstMessage.trim().slice(0, 140),
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await ref.set(payload);
+  return ref.id;
+}
+
+export async function appendMessage({
+  chatId,
+  userId,
+  role,
+  content,
+  language,
+  warningLevel,
+  warningText,
+}: {
+  chatId: string;
+  userId: string;
+  role: "user" | "assistant";
+  content: string;
+  language: AppLanguage;
+  warningLevel: MedicalWarningLevel;
+  warningText?: string | null;
+}) {
+  const ref = adminDb.collection("chats").doc(chatId).collection("messages").doc();
+  await ref.set({
+    chatId,
+    userId,
+    role,
+    content,
+    language,
+    warningLevel,
+    warningText: warningText ?? null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return ref.id;
+}
+
+export async function updateChatSessionMetadata({
+  chatId,
+  language,
+  warningLevel,
+  preview,
+  summary,
+}: {
+  chatId: string;
+  language: AppLanguage;
+  warningLevel: MedicalWarningLevel;
+  preview: string;
+  summary: string;
+}) {
+  await adminDb.collection("chats").doc(chatId).set(
+    {
+      language,
+      warningLevel,
+      lastMessagePreview: preview.slice(0, 140),
+      summary: summary.slice(0, 140),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
