@@ -6,5 +6,17 @@ runConfig:
   memoryMiB: 512
 
 env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyDklokYCn2NMivQ_xhPSqS3DHFJNTqBfHQ
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: medai-20260520.firebaseapp.com
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: medai-20260520
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: medai-20260520.firebasestorage.app
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "495415586304"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:495415586304:web:904133dcb722b90ec972e5
   - variable: OPENAI_API_KEY
     secret: OPENAI_API_KEY
