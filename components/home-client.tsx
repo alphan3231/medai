@@ -13,6 +13,57 @@ import type { AppLanguage } from "@/lib/types";
 
 const featureIcons = [Stethoscope, ShieldCheck, Languages] as const;
 
+const welcomeContent = {
+  en: {
+    heroTitle: "A calmer front door for medical intake.",
+    heroParagraphOne:
+      "MedAI helps people turn scattered symptoms into a clear intake conversation before a real clinical visit begins. Instead of leaving them alone with a blank text box, it asks focused follow-up questions and keeps the exchange readable from start to finish.",
+    heroParagraphTwo:
+      "The goal is not to diagnose. The goal is to make the first part of the medical conversation better: calmer, more structured, easier to review, and less likely to miss an important detail.",
+    sessionTitle: "Human intake rhythm, not a cold form.",
+    sessionBody:
+      "The assistant asks focused follow-ups, streams answers live, and keeps the whole thread tied to the patient account.",
+    chipOne: "Structured symptom intake",
+    chipTwo: "Soft urgent-risk warnings",
+    noteTitle: "Built for real sessions",
+    noteBody:
+      "Open where you left off, stream in place, and keep history readable instead of chaotic. Patients should not have to reconstruct the same story every time they return.",
+    paragraphCardTitle: "Why this landing matters",
+    paragraphCardBody:
+      "A medical intake product should feel trustworthy before the first message is even sent. That means clear language, visible structure, and a tone that feels measured rather than theatrical.",
+  },
+  tr: {
+    heroTitle: "Tibbi on gorusme icin daha sakin bir baslangic.",
+    heroParagraphOne:
+      "MedAI, dağinik belirtileri duzenli bir on gorusmeye cevirmeye yardim eder. Bos bir metin kutusuna kullaniciyi birakmak yerine, yerinde takip sorulari sorar ve konusmayi bastan sona okunabilir tutar.",
+    heroParagraphTwo:
+      "Amaci tani koymak degildir. Amaci, tibbi gorusmenin ilk adimini daha duzenli, daha sakin, daha kolay incelenebilir ve onemli ayrintilarin daha az kacirildigi bir hale getirmektir.",
+    sessionTitle: "Soguk bir form degil, insan gibi akan bir on gorusme.",
+    sessionBody:
+      "Asistan odakli takip sorulari sorar, yanitlari canli akar sekilde yazar ve tum gorusmeyi hesapla bagli tutar.",
+    chipOne: "Duzenli belirti kaydi",
+    chipTwo: "Olculu aciliyet uyarisi",
+    noteTitle: "Gercek kullanim icin tasarlandi",
+    noteBody:
+      "Kaldigin yerden devam et, yanitlari ayni akista gor ve gecmisi karmasik degil okunabilir tut. Kullanici her geri geldiginde hikayesini bastan kurmak zorunda kalmamali.",
+    paragraphCardTitle: "Neden bu ilk ekran onemli",
+    paragraphCardBody:
+      "Tibbi on gorusme urunu, ilk mesaj atilmadan once bile guven vermelidir. Bu da net dil, gorunen bir duzen ve abartili degil olculu bir ton gerektirir.",
+  },
+} satisfies Record<AppLanguage, {
+  heroTitle: string;
+  heroParagraphOne: string;
+  heroParagraphTwo: string;
+  sessionTitle: string;
+  sessionBody: string;
+  chipOne: string;
+  chipTwo: string;
+  noteTitle: string;
+  noteBody: string;
+  paragraphCardTitle: string;
+  paragraphCardBody: string;
+}>;
+
 export function HomeClient() {
   const [language, setLanguage] = useState<AppLanguage>("en");
   const [user, setUser] = useState<User | null>(null);
@@ -37,6 +88,7 @@ export function HomeClient() {
 
   if (!user) {
     const t = copy[language];
+    const wc = welcomeContent[language];
 
     return (
       <main className="min-h-screen overflow-hidden px-4 py-6 md:px-6">
@@ -75,18 +127,19 @@ export function HomeClient() {
                 <div className="max-w-3xl">
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#245946]">{t.intakeBadge}</p>
                   <h1 className="mt-5 max-w-4xl font-[var(--font-display)] text-[clamp(3rem,6vw,5.5rem)] leading-[0.95] text-[#182018]">
-                    A calmer front door for medical intake.
+                    {wc.heroTitle}
                   </h1>
-                  <p className="mt-5 max-w-2xl text-lg leading-8 text-[#425045]">{t.appSubtitle}</p>
+                  <p className="mt-5 max-w-2xl text-lg leading-8 text-[#425045]">{wc.heroParagraphOne}</p>
+                  <p className="mt-4 max-w-2xl text-base leading-8 text-[#556157]">{wc.heroParagraphTwo}</p>
 
                   <div className="mt-8 flex flex-wrap gap-3">
                     <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(24,32,24,0.08)] bg-white/74 px-4 py-2 text-sm text-[#425045]">
                       <Activity className="h-4 w-4 text-[#245946]" />
-                      Structured symptom intake
+                      {wc.chipOne}
                     </div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(24,32,24,0.08)] bg-white/74 px-4 py-2 text-sm text-[#425045]">
                       <ShieldCheck className="h-4 w-4 text-[#245946]" />
-                      Soft urgent-risk warnings
+                      {wc.chipTwo}
                     </div>
                   </div>
                 </div>
@@ -94,10 +147,10 @@ export function HomeClient() {
                 <div className="rounded-[2rem] border border-[rgba(24,32,24,0.08)] bg-[#1f3e33] p-5 text-[#f6f2ea] shadow-[0_24px_60px_rgba(22,34,29,0.24)]">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b9d3c8]">Session feel</p>
                   <p className="mt-3 font-[var(--font-display)] text-3xl leading-tight">
-                    Human intake rhythm, not a cold form.
+                    {wc.sessionTitle}
                   </p>
                   <p className="mt-4 text-sm leading-6 text-[#d7e4de]">
-                    The assistant asks focused follow-ups, streams answers live, and keeps the whole thread tied to the patient account.
+                    {wc.sessionBody}
                   </p>
                 </div>
               </div>
@@ -135,8 +188,21 @@ export function HomeClient() {
                   <span className="font-semibold text-[#182018]">{t.introLabel}:</span> {t.disclaimer}
                 </div>
                 <div className="rounded-[1.85rem] border border-dashed border-[rgba(24,32,24,0.12)] bg-white/56 px-5 py-4 text-sm leading-6 text-[#425045]">
-                  <p className="font-semibold text-[#182018]">Built for real sessions</p>
-                  <p className="mt-2">Open where you left off, stream in place, and keep history readable instead of chaotic.</p>
+                  <p className="font-semibold text-[#182018]">{wc.noteTitle}</p>
+                  <p className="mt-2">{wc.noteBody}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <div className="rounded-[1.9rem] border border-[rgba(24,32,24,0.08)] bg-white/66 p-5 shadow-[0_12px_28px_rgba(24,32,24,0.05)]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#245946]">{wc.paragraphCardTitle}</p>
+                  <p className="mt-3 text-sm leading-7 text-[#4a574d]">{wc.paragraphCardBody}</p>
+                </div>
+                <div className="rounded-[1.9rem] border border-[rgba(24,32,24,0.08)] bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(255,250,244,0.72))] p-5 shadow-[0_12px_28px_rgba(24,32,24,0.05)]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#245946]">{t.appName}</p>
+                  <p className="mt-3 text-base leading-8 text-[#425045]">
+                    {t.featureOneBody} {t.featureTwoBody} {t.featureThreeBody}
+                  </p>
                 </div>
               </div>
             </div>
