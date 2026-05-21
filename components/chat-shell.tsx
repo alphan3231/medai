@@ -138,6 +138,22 @@ function parseSseFrame(frame: string): ChatStreamEvent | null {
   }
 }
 
+function StreamingGlow({ label }: { label: string }) {
+  return (
+    <div className="streaming-glow-wrap">
+      <div className="streaming-glow-orbit">
+        <span className="streaming-glow-dot streaming-glow-dot-one" />
+        <span className="streaming-glow-dot streaming-glow-dot-two" />
+        <span className="streaming-glow-dot streaming-glow-dot-three" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold tracking-[0.18em] text-[#245946]/80 uppercase">{label}</p>
+        <p className="mt-1 text-sm text-[#748076]">Preparing a live answer</p>
+      </div>
+    </div>
+  );
+}
+
 export function ChatShell({
   user,
   language,
@@ -533,6 +549,8 @@ export function ChatShell({
                 message.id === STREAMING_ASSISTANT_ID && streamingFollowUp
                   ? streamingFollowUp
                   : parsedAssistantMessage.followUp;
+              const showStreamingGlow =
+                message.id === STREAMING_ASSISTANT_ID && !parsedAssistantMessage.body;
 
               return (
                 <article
@@ -544,9 +562,13 @@ export function ChatShell({
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <p className="whitespace-pre-wrap text-sm leading-7">
-                      {parsedAssistantMessage.body || (message.id === STREAMING_ASSISTANT_ID ? "..." : "")}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      {showStreamingGlow ? (
+                        <StreamingGlow label={t.sending} />
+                      ) : (
+                        <p className="whitespace-pre-wrap text-sm leading-7">{parsedAssistantMessage.body}</p>
+                      )}
+                    </div>
                     <span
                       className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] ${
                         message.role === "user" ? "text-white/70" : "text-[#748076]"
