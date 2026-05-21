@@ -12,12 +12,92 @@ import { formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type ChatApiReply = {
-  chatId: string;
-  session: ChatSession;
-  userMessage: ChatMessage;
-  assistantMessage: ChatMessage;
-};
+const OPTIMISTIC_USER_ID = "optimistic-user";
+const STREAMING_ASSISTANT_ID = "streaming-assistant";
+
+type ChatStreamEvent =
+  | {
+      type: "start";
+      chatId: string;
+      session: ChatSession;
+      userMessage: ChatMessage;
+      assistantDraft: {
+        language: AppLanguage;
+        warningLevel: ChatMessage["warningLevel"];
+        warningText: string | null;
+      };
+    }
+  | {
+      type: "delta";
+      delta: string;
+    }
+  | {
+      type: "done";
+      chatId: string;
+      session: ChatSession;
+      assistantMessage: ChatMessage;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
+
+function buildOptimisticUserMessage(message: string, userId: string, language: AppLanguage): ChatMessage {
+  return {
+    id: OPTIMISTIC_USER_ID,
+    chatId: "",
+    userId,
+    role: "user",
+    content: message,
+    language,
+    warningLevel: "none",
+    warningText: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function buildStreamingAssistantMessage(language: AppLanguage): ChatMessage {
+  return {
+    id: STREAMING_ASSISTANT_ID,
+    chatId: "",
+    userId: "",
+    role: "assistant",
+    content: "",
+    language,
+    warningLevel: "none",
+    warningText: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function parseAssistantFollowUp(content: string) {
+  const questionMatch = content.match(/FOLLOW_UP_QUESTION:\s*(.+)/);
+  const optionsMatch = content.match(/FOLLOW_UP_OPTIONS:\s*([\s\S]+)/);
+
+  if (!questionMatch || !optionsMatch) {
+    return {
+      body: content.trim(),
+      question: null,
+      options: [] as string[],
+    };
+  }
+
+  const options = optionsMatch[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const markerIndex = content.indexOf("FOLLOW_UP_QUESTION:");
+
+  return {
+    body: content.slice(0, markerIndex).trim(),
+    question: questionMatch[1]?.trim() || null,
+    options,
+  };
+}
 
 export function ChatShell({
   user,
@@ -113,47 +193,142 @@ export function ChatShell({
     return () => window.clearTimeout(timeout);
   }, [user.uid]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!input.trim() || sending) {
+  async function submitMessage(rawMessage: string) {
+    if (!rawMessage.trim() || sending) {
       return;
     }
 
+    const nextInput = rawMessage.trim();
     setSending(true);
     setError("");
+    setInput("");
+    setMessages((current) => [
+      ...current,
+      buildOptimisticUserMessage(nextInput, user.uid, language),
+      buildStreamingAssistantMessage(language),
+    ]);
 
     try {
       const response = await authorizedFetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({
           chatId: activeChatId,
-          message: input.trim(),
+          message: nextInput,
           language,
         }),
       });
-      const payload = (await response.json()) as ChatApiReply & { error?: string };
 
       if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error ?? t.genericError);
       }
 
-      setMessages((current) => {
-        const withoutPending = current.filter((item) => item.id !== "pending");
-        return [...withoutPending, payload.userMessage, payload.assistantMessage];
-      });
+      if (!response.body) {
+        throw new Error(t.genericError);
+      }
 
-      setSessions((current) => {
-        const next = [payload.session, ...current.filter((item) => item.id !== payload.session.id)];
-        return next;
-      });
-      setActiveChatId(payload.chatId);
-      setInput("");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      const applyStreamEvent = (eventPayload: ChatStreamEvent) => {
+        if (eventPayload.type === "start") {
+          setActiveChatId(eventPayload.chatId);
+          setSessions((current) => [
+            eventPayload.session,
+            ...current.filter((item) => item.id !== eventPayload.session.id),
+          ]);
+          setMessages((current) =>
+            current.map((item) => {
+              if (item.id === OPTIMISTIC_USER_ID) {
+                return eventPayload.userMessage;
+              }
+
+              if (item.id === STREAMING_ASSISTANT_ID) {
+                return {
+                  ...item,
+                  chatId: eventPayload.chatId,
+                  userId: eventPayload.userMessage.userId,
+                  language: eventPayload.assistantDraft.language,
+                  warningLevel: eventPayload.assistantDraft.warningLevel,
+                  warningText: eventPayload.assistantDraft.warningText,
+                };
+              }
+
+              return item;
+            }),
+          );
+          return;
+        }
+
+        if (eventPayload.type === "delta") {
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === STREAMING_ASSISTANT_ID
+                ? { ...item, content: `${item.content}${eventPayload.delta}` }
+                : item,
+            ),
+          );
+          return;
+        }
+
+        if (eventPayload.type === "done") {
+          setActiveChatId(eventPayload.chatId);
+          setSessions((current) => [
+            eventPayload.session,
+            ...current.filter((item) => item.id !== eventPayload.session.id),
+          ]);
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === STREAMING_ASSISTANT_ID ? eventPayload.assistantMessage : item,
+            ),
+          );
+          return;
+        }
+
+        throw new Error(eventPayload.error);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          applyStreamEvent(JSON.parse(line) as ChatStreamEvent);
+        }
+
+        if (done) {
+          break;
+        }
+      }
+
+      if (buffer.trim()) {
+        applyStreamEvent(JSON.parse(buffer) as ChatStreamEvent);
+      }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : t.genericError;
+      setMessages((current) =>
+        current.filter(
+          (item) => item.id !== OPTIMISTIC_USER_ID && item.id !== STREAMING_ASSISTANT_ID,
+        ),
+      );
+      setInput(nextInput);
       setError(message.includes("OPENAI_API_KEY") ? t.missingKeyError : message);
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitMessage(input);
   }
 
   function startNewChat() {
@@ -289,38 +464,65 @@ export function ChatShell({
               </div>
             ) : null}
 
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`max-w-3xl rounded-[1.75rem] px-5 py-4 ${
-                  message.role === "user"
-                    ? "ml-auto bg-[#245946] text-white shadow-[0_16px_36px_rgba(36,89,70,0.24)]"
-                    : "border border-[rgba(24,32,24,0.08)] bg-white/88 text-[#182018]"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <p className="whitespace-pre-wrap text-sm leading-7">{message.content}</p>
-                  <span
-                    className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] ${
-                      message.role === "user" ? "text-white/70" : "text-[#748076]"
-                    }`}
-                  >
-                    {message.role === "user" ? t.userRole : t.assistantRole}
-                  </span>
-                </div>
-                {message.warningLevel === "soft" && message.warningText ? (
-                  <div
-                    className={`mt-4 rounded-[1.25rem] px-4 py-3 text-sm leading-6 ${
-                      message.role === "user"
-                        ? "bg-white/12 text-white/90"
-                        : "bg-[#fff2eb] text-[#8f3e2f]"
-                    }`}
-                  >
-                    {message.warningText}
+            {messages.map((message) => {
+              const followUp =
+                message.role === "assistant"
+                  ? parseAssistantFollowUp(message.content)
+                  : { body: message.content, question: null, options: [] as string[] };
+
+              return (
+                <article
+                  key={message.id}
+                  className={`max-w-3xl rounded-[1.75rem] px-5 py-4 ${
+                    message.role === "user"
+                      ? "ml-auto bg-[#245946] text-white shadow-[0_16px_36px_rgba(36,89,70,0.24)]"
+                      : "border border-[rgba(24,32,24,0.08)] bg-white/88 text-[#182018]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="whitespace-pre-wrap text-sm leading-7">
+                      {followUp.body || (message.id === STREAMING_ASSISTANT_ID ? t.sending : "")}
+                    </p>
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] ${
+                        message.role === "user" ? "text-white/70" : "text-[#748076]"
+                      }`}
+                    >
+                      {message.role === "user" ? t.userRole : t.assistantRole}
+                    </span>
                   </div>
-                ) : null}
-              </article>
-            ))}
+                  {message.warningLevel === "soft" && message.warningText ? (
+                    <div
+                      className={`mt-4 rounded-[1.25rem] px-4 py-3 text-sm leading-6 ${
+                        message.role === "user"
+                          ? "bg-white/12 text-white/90"
+                          : "bg-[#fff2eb] text-[#8f3e2f]"
+                      }`}
+                    >
+                      {message.warningText}
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && followUp.question ? (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-sm font-semibold text-[#245946]">{followUp.question}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {followUp.options.map((option) => (
+                          <button
+                            key={`${message.id}-${option}`}
+                            className="rounded-full border border-[#245946]/15 bg-[#f4faf7] px-3 py-2 text-sm font-medium text-[#245946] transition hover:border-[#245946]/35 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={sending}
+                            onClick={() => void submitMessage(option)}
+                            type="button"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
 
             {sending ? (
               <div className="inline-flex items-center gap-3 rounded-full border border-[rgba(24,32,24,0.08)] bg-white/80 px-4 py-3 text-sm text-[#5c665d]">
