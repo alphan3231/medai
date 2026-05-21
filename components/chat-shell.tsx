@@ -3,9 +3,10 @@
 import { type FormEvent, useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { signOut } from "firebase/auth";
-import { AlertTriangle, ArrowUpRight, Languages, LogOut, MessageSquarePlus, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertTriangle, Languages, LogOut, MessageSquarePlus, ShieldAlert, Sparkles } from "lucide-react";
 
 import { auth } from "@/lib/firebase/client";
+import { extractFollowUp, type FollowUpSuggestion } from "@/lib/follow-up";
 import { copy, getWarningCopy } from "@/lib/i18n";
 import type { AppLanguage, ChatMessage, ChatSession } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/utils";
@@ -15,31 +16,46 @@ import { Textarea } from "@/components/ui/textarea";
 const OPTIMISTIC_USER_ID = "optimistic-user";
 const STREAMING_ASSISTANT_ID = "streaming-assistant";
 
+type StartPayload = {
+  chatId: string;
+  session: ChatSession;
+  userMessage: ChatMessage;
+  assistantDraft: {
+    language: AppLanguage;
+    warningLevel: ChatMessage["warningLevel"];
+    warningText: string | null;
+  };
+};
+
+type DonePayload = {
+  chatId: string;
+  session: ChatSession;
+  assistantMessage: ChatMessage;
+};
+
 type ChatStreamEvent =
+  | { event: "open"; payload: { at: string } }
+  | { event: "heartbeat"; payload: { at: string } }
+  | { event: "start"; payload: StartPayload }
   | {
-      type: "start";
-      chatId: string;
-      session: ChatSession;
-      userMessage: ChatMessage;
-      assistantDraft: {
-        language: AppLanguage;
-        warningLevel: ChatMessage["warningLevel"];
-        warningText: string | null;
+      event: "delta";
+      payload: {
+        delta: string;
       };
     }
   | {
-      type: "delta";
-      delta: string;
+      event: "follow_up";
+      payload: FollowUpSuggestion;
     }
   | {
-      type: "done";
-      chatId: string;
-      session: ChatSession;
-      assistantMessage: ChatMessage;
+      event: "done";
+      payload: DonePayload;
     }
   | {
-      type: "error";
-      error: string;
+      event: "error";
+      payload: {
+        error: string;
+      };
     };
 
 function buildOptimisticUserMessage(message: string, userId: string, language: AppLanguage): ChatMessage {
@@ -70,33 +86,56 @@ function buildStreamingAssistantMessage(language: AppLanguage): ChatMessage {
   };
 }
 
-function parseAssistantFollowUp(content: string) {
-  const questionMatch = content.match(/FOLLOW_UP_QUESTION:\s*(.+)/);
-  const optionsMatch = content.match(/FOLLOW_UP_OPTIONS:\s*([\s\S]+)/);
+function parseSseFrame(frame: string): ChatStreamEvent | null {
+  let eventName = "message";
+  const dataLines: string[] = [];
 
-  if (!questionMatch || !optionsMatch) {
-    return {
-      body: content.trim(),
-      question: null,
-      options: [] as string[],
-    };
+  for (const rawLine of frame.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
   }
 
-  const options = optionsMatch[1]
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .map((line) => line.slice(2).trim())
-    .filter(Boolean)
-    .slice(0, 4);
+  if (!dataLines.length) {
+    return null;
+  }
 
-  const markerIndex = content.indexOf("FOLLOW_UP_QUESTION:");
+  const payload = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
 
-  return {
-    body: content.slice(0, markerIndex).trim(),
-    question: questionMatch[1]?.trim() || null,
-    options,
-  };
+  switch (eventName) {
+    case "open":
+      return { event: "open", payload: payload as { at: string } };
+    case "heartbeat":
+      return { event: "heartbeat", payload: payload as { at: string } };
+    case "start":
+      return {
+        event: "start",
+        payload: payload as StartPayload,
+      };
+    case "delta":
+      return { event: "delta", payload: payload as { delta: string } };
+    case "follow_up":
+      return { event: "follow_up", payload: payload as FollowUpSuggestion };
+    case "done":
+      return {
+        event: "done",
+        payload: payload as DonePayload,
+      };
+    case "error":
+      return { event: "error", payload: payload as { error: string } };
+    default:
+      return null;
+  }
 }
 
 export function ChatShell({
@@ -116,6 +155,7 @@ export function ChatShell({
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [streamingFollowUp, setStreamingFollowUp] = useState<FollowUpSuggestion | null>(null);
 
   const activeSession = sessions.find((item) => item.id === activeChatId) ?? null;
   const warningCopy = getWarningCopy(language, activeSession?.warningLevel ?? "none");
@@ -173,6 +213,7 @@ export function ChatShell({
       }
 
       setMessages(payload.messages as ChatMessage[]);
+      setStreamingFollowUp(null);
       const session = payload.session as ChatSession;
       if (session?.language) {
         onLanguageChange(session.language);
@@ -202,6 +243,7 @@ export function ChatShell({
     setSending(true);
     setError("");
     setInput("");
+    setStreamingFollowUp(null);
     setMessages((current) => [
       ...current,
       buildOptimisticUserMessage(nextInput, user.uid, language),
@@ -232,26 +274,30 @@ export function ChatShell({
       let buffer = "";
 
       const applyStreamEvent = (eventPayload: ChatStreamEvent) => {
-        if (eventPayload.type === "start") {
-          setActiveChatId(eventPayload.chatId);
+        if (eventPayload.event === "open" || eventPayload.event === "heartbeat") {
+          return;
+        }
+
+        if (eventPayload.event === "start") {
+          setActiveChatId(eventPayload.payload.chatId);
           setSessions((current) => [
-            eventPayload.session,
-            ...current.filter((item) => item.id !== eventPayload.session.id),
+            eventPayload.payload.session,
+            ...current.filter((item) => item.id !== eventPayload.payload.session.id),
           ]);
           setMessages((current) =>
             current.map((item) => {
               if (item.id === OPTIMISTIC_USER_ID) {
-                return eventPayload.userMessage;
+                return eventPayload.payload.userMessage;
               }
 
               if (item.id === STREAMING_ASSISTANT_ID) {
                 return {
                   ...item,
-                  chatId: eventPayload.chatId,
-                  userId: eventPayload.userMessage.userId,
-                  language: eventPayload.assistantDraft.language,
-                  warningLevel: eventPayload.assistantDraft.warningLevel,
-                  warningText: eventPayload.assistantDraft.warningText,
+                  chatId: eventPayload.payload.chatId,
+                  userId: eventPayload.payload.userMessage.userId,
+                  language: eventPayload.payload.assistantDraft.language,
+                  warningLevel: eventPayload.payload.assistantDraft.warningLevel,
+                  warningText: eventPayload.payload.assistantDraft.warningText,
                 };
               }
 
@@ -261,47 +307,56 @@ export function ChatShell({
           return;
         }
 
-        if (eventPayload.type === "delta") {
+        if (eventPayload.event === "delta") {
           setMessages((current) =>
             current.map((item) =>
               item.id === STREAMING_ASSISTANT_ID
-                ? { ...item, content: `${item.content}${eventPayload.delta}` }
+                ? { ...item, content: `${item.content}${eventPayload.payload.delta}` }
                 : item,
             ),
           );
           return;
         }
 
-        if (eventPayload.type === "done") {
-          setActiveChatId(eventPayload.chatId);
-          setSessions((current) => [
-            eventPayload.session,
-            ...current.filter((item) => item.id !== eventPayload.session.id),
-          ]);
-          setMessages((current) =>
-            current.map((item) =>
-              item.id === STREAMING_ASSISTANT_ID ? eventPayload.assistantMessage : item,
-            ),
-          );
+        if (eventPayload.event === "follow_up") {
+          setStreamingFollowUp(eventPayload.payload);
           return;
         }
 
-        throw new Error(eventPayload.error);
+        if (eventPayload.event === "done") {
+          setActiveChatId(eventPayload.payload.chatId);
+          setSessions((current) => [
+            eventPayload.payload.session,
+            ...current.filter((item) => item.id !== eventPayload.payload.session.id),
+          ]);
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === STREAMING_ASSISTANT_ID ? eventPayload.payload.assistantMessage : item,
+            ),
+          );
+          setStreamingFollowUp(null);
+          return;
+        }
+
+        throw new Error(eventPayload.payload.error);
       };
 
       while (true) {
         const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
+        buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
 
-        for (const line of lines) {
-          if (!line.trim()) {
+        for (const frame of frames) {
+          if (!frame.trim()) {
             continue;
           }
 
-          applyStreamEvent(JSON.parse(line) as ChatStreamEvent);
+          const parsedEvent = parseSseFrame(frame);
+          if (parsedEvent) {
+            applyStreamEvent(parsedEvent);
+          }
         }
 
         if (done) {
@@ -310,7 +365,10 @@ export function ChatShell({
       }
 
       if (buffer.trim()) {
-        applyStreamEvent(JSON.parse(buffer) as ChatStreamEvent);
+        const parsedEvent = parseSseFrame(buffer);
+        if (parsedEvent) {
+          applyStreamEvent(parsedEvent);
+        }
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : t.genericError;
@@ -319,6 +377,7 @@ export function ChatShell({
           (item) => item.id !== OPTIMISTIC_USER_ID && item.id !== STREAMING_ASSISTANT_ID,
         ),
       );
+      setStreamingFollowUp(null);
       setInput(nextInput);
       setError(message.includes("OPENAI_API_KEY") ? t.missingKeyError : message);
     } finally {
@@ -334,6 +393,7 @@ export function ChatShell({
   function startNewChat() {
     setActiveChatId(null);
     setMessages([]);
+    setStreamingFollowUp(null);
     setError("");
     setInput("");
   }
@@ -465,10 +525,14 @@ export function ChatShell({
             ) : null}
 
             {messages.map((message) => {
-              const followUp =
+              const parsedAssistantMessage =
                 message.role === "assistant"
-                  ? parseAssistantFollowUp(message.content)
-                  : { body: message.content, question: null, options: [] as string[] };
+                  ? extractFollowUp(message.content)
+                  : { body: message.content, followUp: null };
+              const followUp =
+                message.id === STREAMING_ASSISTANT_ID && streamingFollowUp
+                  ? streamingFollowUp
+                  : parsedAssistantMessage.followUp;
 
               return (
                 <article
@@ -481,7 +545,7 @@ export function ChatShell({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <p className="whitespace-pre-wrap text-sm leading-7">
-                      {followUp.body || (message.id === STREAMING_ASSISTANT_ID ? t.sending : "")}
+                      {parsedAssistantMessage.body || (message.id === STREAMING_ASSISTANT_ID ? "..." : "")}
                     </p>
                     <span
                       className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] ${
@@ -502,7 +566,7 @@ export function ChatShell({
                       {message.warningText}
                     </div>
                   ) : null}
-                  {message.role === "assistant" && followUp.question ? (
+                  {message.role === "assistant" && followUp?.question ? (
                     <div className="mt-4 space-y-3">
                       <p className="text-sm font-semibold text-[#245946]">{followUp.question}</p>
                       <div className="flex flex-wrap gap-2">
@@ -523,13 +587,6 @@ export function ChatShell({
                 </article>
               );
             })}
-
-            {sending ? (
-              <div className="inline-flex items-center gap-3 rounded-full border border-[rgba(24,32,24,0.08)] bg-white/80 px-4 py-3 text-sm text-[#5c665d]">
-                <ArrowUpRight className="h-4 w-4 animate-pulse" />
-                {t.sending}
-              </div>
-            ) : null}
           </div>
 
           <div className="border-t border-[rgba(24,32,24,0.08)] px-6 py-5">

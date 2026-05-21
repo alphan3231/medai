@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 
+import { extractFollowUp } from "@/lib/follow-up";
 import { buildSystemPrompt } from "@/lib/medical";
 import type { AppLanguage, ChatMessage, MedicalWarningLevel } from "@/lib/types";
 
@@ -14,6 +15,26 @@ function getClient() {
   }
 
   return new OpenAI({ apiKey });
+}
+
+function buildTranscriptContext(history: ChatMessage[], message: string) {
+  const priorTurns = history
+    .map((item) => {
+      const cleanedContent =
+        item.role === "assistant" ? extractFollowUp(item.content).body : item.content.trim();
+
+      if (!cleanedContent) {
+        return null;
+      }
+
+      return `${item.role === "user" ? "User" : "Assistant"}: ${cleanedContent}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  return priorTurns
+    ? `Conversation so far:\n${priorTurns}\n\nCurrent user message:\n${message}`
+    : `Current user message:\n${message}`;
 }
 
 function buildInput({
@@ -32,30 +53,9 @@ function buildInput({
       role: "system" as const,
       content: buildSystemPrompt(language, warningLevel),
     },
-    ...history.map((item) =>
-      item.role === "assistant"
-        ? {
-            id: `msg_${item.id}`,
-            role: "assistant" as const,
-            status: "completed" as const,
-            type: "message" as const,
-            phase: "final_answer" as const,
-            content: [
-              {
-                type: "output_text" as const,
-                text: item.content,
-                annotations: [],
-              },
-            ],
-          }
-        : {
-            role: "user" as const,
-            content: item.content,
-          },
-    ),
     {
       role: "user" as const,
-      content: message,
+      content: buildTranscriptContext(history, message),
     },
   ];
 }

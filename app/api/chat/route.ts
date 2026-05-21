@@ -11,12 +11,15 @@ import {
   getRecentMessages,
   updateChatSessionMetadata,
 } from "@/lib/chat-store";
+import { extractFollowUp } from "@/lib/follow-up";
 import { copy, getWarningCopy } from "@/lib/i18n";
 import { detectMedicalWarning } from "@/lib/medical";
 import { streamMedicalReply } from "@/lib/openai";
 import type { AppLanguage, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const payloadSchema = z.object({
   chatId: z.string().trim().min(1).optional().nullable(),
@@ -24,32 +27,27 @@ const payloadSchema = z.object({
   language: z.enum(["en", "tr"]),
 });
 
-type StreamEvent =
-  | {
-      type: "start";
-      chatId: string;
-      session: ChatSession;
-      userMessage: ChatMessage;
-      assistantDraft: {
-        language: AppLanguage;
-        warningLevel: MedicalWarningLevel;
-        warningText: string | null;
-      };
-    }
-  | {
-      type: "delta";
-      delta: string;
-    }
-  | {
-      type: "done";
-      chatId: string;
-      session: ChatSession;
-      assistantMessage: ChatMessage;
-    }
-  | {
-      type: "error";
-      error: string;
-    };
+type StartEvent = {
+  chatId: string;
+  session: ChatSession;
+  userMessage: ChatMessage;
+  assistantDraft: {
+    language: AppLanguage;
+    warningLevel: MedicalWarningLevel;
+    warningText: string | null;
+  };
+};
+
+type FollowUpEvent = {
+  question: string;
+  options: string[];
+};
+
+type DoneEvent = {
+  chatId: string;
+  session: ChatSession;
+  assistantMessage: ChatMessage;
+};
 
 function nowIso() {
   return new Date().toISOString();
@@ -145,8 +143,12 @@ function buildUpdatedSession({
   });
 }
 
-function encodeEvent(encoder: TextEncoder, event: StreamEvent) {
-  return encoder.encode(`${JSON.stringify(event)}\n`);
+function encodeSseEvent(encoder: TextEncoder, event: string, payload?: unknown) {
+  if (payload === undefined) {
+    return encoder.encode(`event: ${event}\n\n`);
+  }
+
+  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
 export async function POST(request: Request) {
@@ -216,11 +218,19 @@ export async function POST(request: Request) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const send = (event: StreamEvent) => controller.enqueue(encodeEvent(encoder, event));
+        const send = (event: string, eventPayload?: unknown) =>
+          controller.enqueue(encodeSseEvent(encoder, event, eventPayload));
+        const heartbeatId = setInterval(() => {
+          try {
+            send("heartbeat", { at: nowIso() });
+          } catch {
+            clearInterval(heartbeatId);
+          }
+        }, 15000);
 
         try {
-          send({
-            type: "start",
+          send("open", { at: nowIso() });
+          send("start", {
             chatId,
             session: startingSession,
             userMessage: buildMessageShape({
@@ -237,9 +247,10 @@ export async function POST(request: Request) {
               warningLevel,
               warningText,
             },
-          });
+          } satisfies StartEvent);
 
           let assistantText = "";
+          let emittedFollowUpSignature = "";
 
           for await (const delta of streamMedicalReply({
             message: payload.message,
@@ -248,10 +259,28 @@ export async function POST(request: Request) {
             warningLevel,
           })) {
             assistantText += delta;
-            send({ type: "delta", delta });
+            send("delta", { delta });
+
+            const { followUp } = extractFollowUp(assistantText);
+            if (!followUp || !followUp.options.length) {
+              continue;
+            }
+
+            const signature = `${followUp.question}::${followUp.options.join("::")}`;
+            if (signature === emittedFollowUpSignature) {
+              continue;
+            }
+
+            emittedFollowUpSignature = signature;
+            send("follow_up", {
+              question: followUp.question,
+              options: followUp.options,
+            } satisfies FollowUpEvent);
           }
 
           const finalizedAssistantText = assistantText.trim() || assistantText;
+          const cleanedAssistantText =
+            extractFollowUp(finalizedAssistantText).body || finalizedAssistantText;
           const assistantMessageId = await appendMessage({
             chatId,
             userId: user.uid,
@@ -266,19 +295,18 @@ export async function POST(request: Request) {
             chatId,
             language: payload.language,
             warningLevel,
-            preview: finalizedAssistantText,
+            preview: cleanedAssistantText,
             summary: payload.message,
           });
 
-          send({
-            type: "done",
+          send("done", {
             chatId,
             session: buildUpdatedSession({
               session: startingSession,
               language: payload.language,
               warningLevel,
               summary: payload.message,
-              preview: finalizedAssistantText,
+              preview: cleanedAssistantText,
             }),
             assistantMessage: buildMessageShape({
               id: assistantMessageId,
@@ -290,17 +318,17 @@ export async function POST(request: Request) {
               warningLevel,
               warningText,
             }),
-          });
+          } satisfies DoneEvent);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : copy[payload.language].genericError;
-          send({
-            type: "error",
+          send("error", {
             error: message.includes("OPENAI_API_KEY")
               ? copy[payload.language].missingKeyError
               : message,
           });
         } finally {
+          clearInterval(heartbeatId);
           controller.close();
         }
       },
@@ -310,12 +338,12 @@ export async function POST(request: Request) {
       headers: {
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "X-Accel-Buffering": "no",
       },
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : copy.en.genericError;
+    const message = error instanceof Error ? error.message : copy.en.genericError;
     const status = error instanceof z.ZodError ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
