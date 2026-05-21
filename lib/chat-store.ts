@@ -25,6 +25,7 @@ function buildSummary(message: string) {
 
 const CHAT_QUOTA_LIMIT = 5;
 const CHAT_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+const CHAT_QUOTA_EXEMPT_EMAILS = new Set(["alphanozcan@gmail.com"]);
 
 type ChatQuotaResult = {
   allowed: boolean;
@@ -43,7 +44,18 @@ export async function ensureUserProfile(user: { uid: string; email?: string | nu
   );
 }
 
-export async function consumeChatQuota(userId: string): Promise<ChatQuotaResult> {
+export async function consumeChatQuota(
+  userId: string,
+  email?: string | null,
+): Promise<ChatQuotaResult> {
+  if (email && CHAT_QUOTA_EXEMPT_EMAILS.has(email.trim().toLowerCase())) {
+    return {
+      allowed: true,
+      remaining: Number.MAX_SAFE_INTEGER,
+      resetAt: new Date(0).toISOString(),
+    };
+  }
+
   const ref = adminDb.collection("users").doc(userId).collection("rateLimits").doc("chatMessages");
   const now = new Date();
 

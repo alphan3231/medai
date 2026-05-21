@@ -159,7 +159,7 @@ export async function POST(request: Request) {
     await ensureUserProfile(user);
     const body = await request.json();
     const payload = payloadSchema.parse(body);
-    const quota = await consumeChatQuota(user.uid);
+    const quota = await consumeChatQuota(user.uid, user.email);
 
     if (!quota.allowed) {
       return NextResponse.json(
