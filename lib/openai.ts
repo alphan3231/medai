@@ -35,7 +35,7 @@ function buildInput({
     ...history.map((item) =>
       item.role === "assistant"
         ? {
-            id: item.id,
+            id: `msg_${item.id}`,
             role: "assistant" as const,
             status: "completed" as const,
             type: "message" as const,
