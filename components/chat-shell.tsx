@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { signOut } from "firebase/auth";
 import { AlertTriangle, Languages, LogOut, MessageSquarePlus, ShieldAlert, Sparkles } from "lucide-react";
@@ -172,6 +172,9 @@ export function ChatShell({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [streamingFollowUp, setStreamingFollowUp] = useState<FollowUpSuggestion | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const pendingInitialScrollRef = useRef(false);
 
   const activeSession = sessions.find((item) => item.id === activeChatId) ?? null;
   const warningCopy = getWarningCopy(language, activeSession?.warningLevel ?? "none");
@@ -181,6 +184,26 @@ export function ChatShell({
     ? extractFollowUp(streamingAssistantMessage.content).body.trim()
     : "";
   const showStandaloneStreamingBubble = sending && !streamingAssistantBody;
+
+  function scrollChatToBottom() {
+    const element = chatScrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    element.scrollTop = element.scrollHeight;
+  }
+
+  function handleChatScroll() {
+    const element = chatScrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 72;
+  }
 
   async function authorizedFetch(url: string, init?: RequestInit) {
     const token = await user.getIdToken();
@@ -213,6 +236,7 @@ export function ChatShell({
         await loadConversation(nextSessions[0].id);
       } else if (!nextSessions.length) {
         setMessages([]);
+        pendingInitialScrollRef.current = false;
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : t.genericError;
@@ -226,6 +250,8 @@ export function ChatShell({
     setActiveChatId(chatId);
     setLoadingHistory(true);
     setError("");
+    pendingInitialScrollRef.current = true;
+    shouldStickToBottomRef.current = true;
 
     try {
       const response = await authorizedFetch(`/api/chats/${chatId}`);
@@ -256,6 +282,19 @@ export function ChatShell({
     return () => window.clearTimeout(timeout);
   }, [user.uid]);
 
+  useLayoutEffect(() => {
+    if (pendingInitialScrollRef.current) {
+      scrollChatToBottom();
+      pendingInitialScrollRef.current = false;
+      shouldStickToBottomRef.current = true;
+      return;
+    }
+
+    if (shouldStickToBottomRef.current) {
+      scrollChatToBottom();
+    }
+  }, [activeChatId, messages, showStandaloneStreamingBubble]);
+
   async function submitMessage(rawMessage: string) {
     if (!rawMessage.trim() || sending) {
       return;
@@ -266,6 +305,7 @@ export function ChatShell({
     setError("");
     setInput("");
     setStreamingFollowUp(null);
+    shouldStickToBottomRef.current = true;
     setMessages((current) => [
       ...current,
       buildOptimisticUserMessage(nextInput, user.uid, language),
@@ -418,6 +458,8 @@ export function ChatShell({
     setStreamingFollowUp(null);
     setError("");
     setInput("");
+    pendingInitialScrollRef.current = false;
+    shouldStickToBottomRef.current = true;
   }
 
   return (
@@ -532,7 +574,11 @@ export function ChatShell({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain px-6 py-6">
+          <div
+            className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain px-6 py-6"
+            onScroll={handleChatScroll}
+            ref={chatScrollRef}
+          >
             {error ? (
               <div className="rounded-[1.5rem] border border-[#b4533f]/20 bg-[#fff2eb] px-4 py-3 text-sm text-[#8f3e2f]">
                 {error}
