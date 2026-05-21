@@ -6,6 +6,9 @@ import type { AppLanguage, ChatMessage, MedicalWarningLevel } from "@/lib/types"
 
 const MODEL = "gpt-5-nano-2025-08-07";
 const FALLBACK_REPLY = "I need a little more detail to continue the intake.";
+const REASONING = {
+  effort: "minimal" as const,
+};
 
 function getClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -76,6 +79,7 @@ export async function generateMedicalReply({
   const response = await client.responses.create({
     model: MODEL,
     input: buildInput({ message, language, history, warningLevel }),
+    reasoning: REASONING,
   });
 
   return response.output_text?.trim() || FALLBACK_REPLY;
@@ -96,6 +100,7 @@ export async function* streamMedicalReply({
   const stream = await client.responses.create({
     model: MODEL,
     input: buildInput({ message, language, history, warningLevel }),
+    reasoning: REASONING,
     stream: true,
   });
 
