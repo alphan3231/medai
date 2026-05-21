@@ -175,6 +175,12 @@ export function ChatShell({
 
   const activeSession = sessions.find((item) => item.id === activeChatId) ?? null;
   const warningCopy = getWarningCopy(language, activeSession?.warningLevel ?? "none");
+  const streamingAssistantMessage =
+    messages.find((item) => item.id === STREAMING_ASSISTANT_ID) ?? null;
+  const streamingAssistantBody = streamingAssistantMessage
+    ? extractFollowUp(streamingAssistantMessage.content).body.trim()
+    : "";
+  const showStandaloneStreamingBubble = sending && !streamingAssistantBody;
 
   async function authorizedFetch(url: string, init?: RequestInit) {
     const token = await user.getIdToken();
@@ -549,8 +555,10 @@ export function ChatShell({
                 message.id === STREAMING_ASSISTANT_ID && streamingFollowUp
                   ? streamingFollowUp
                   : parsedAssistantMessage.followUp;
-              const showStreamingGlow =
-                message.id === STREAMING_ASSISTANT_ID && !parsedAssistantMessage.body;
+
+              if (message.id === STREAMING_ASSISTANT_ID && !parsedAssistantMessage.body.trim()) {
+                return null;
+              }
 
               return (
                 <article
@@ -563,11 +571,7 @@ export function ChatShell({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
-                      {showStreamingGlow ? (
-                        <StreamingGlow label={t.sending} />
-                      ) : (
-                        <p className="whitespace-pre-wrap text-sm leading-7">{parsedAssistantMessage.body}</p>
-                      )}
+                      <p className="whitespace-pre-wrap text-sm leading-7">{parsedAssistantMessage.body}</p>
                     </div>
                     <span
                       className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] ${
@@ -609,6 +613,19 @@ export function ChatShell({
                 </article>
               );
             })}
+
+            {showStandaloneStreamingBubble ? (
+              <article className="max-w-3xl rounded-[1.75rem] border border-[rgba(24,32,24,0.08)] bg-white/88 px-5 py-4 text-[#182018]">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <StreamingGlow label={t.sending} />
+                  </div>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#748076]">
+                    {t.assistantRole}
+                  </span>
+                </div>
+              </article>
+            ) : null}
           </div>
 
           <div className="border-t border-[rgba(24,32,24,0.08)] px-6 py-5">
