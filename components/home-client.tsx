@@ -33,22 +33,22 @@ const welcomeContent = {
       "A medical intake product should feel trustworthy before the first message is even sent. That means clear language, visible structure, and a tone that feels measured rather than theatrical.",
   },
   tr: {
-    heroTitle: "Tibbi on gorusme icin daha sakin bir baslangic.",
+    heroTitle: "Tıbbi ön görüşme için daha sakin bir başlangıç.",
     heroParagraphOne:
-      "MedAI, dağinik belirtileri duzenli bir on gorusmeye cevirmeye yardim eder. Bos bir metin kutusuna kullaniciyi birakmak yerine, yerinde takip sorulari sorar ve konusmayi bastan sona okunabilir tutar.",
+      "MedAI, dağınık belirtileri düzenli bir ön görüşmeye çevirmeye yardım eder. Boş bir metin kutusuna kullanıcıyı bırakmak yerine, yerinde takip soruları sorar ve konuşmayı baştan sona okunabilir tutar.",
     heroParagraphTwo:
-      "Amaci tani koymak degildir. Amaci, tibbi gorusmenin ilk adimini daha duzenli, daha sakin, daha kolay incelenebilir ve onemli ayrintilarin daha az kacirildigi bir hale getirmektir.",
-    sessionTitle: "Soguk bir form degil, insan gibi akan bir on gorusme.",
+      "Amacı tanı koymak değildir. Amacı, tıbbi görüşmenin ilk adımını daha düzenli, daha sakin, daha kolay incelenebilir ve önemli ayrıntıların daha az kaçırıldığı bir hâle getirmektir.",
+    sessionTitle: "Soğuk bir form değil, insan gibi akan bir ön görüşme.",
     sessionBody:
-      "Asistan odakli takip sorulari sorar, yanitlari canli akar sekilde yazar ve tum gorusmeyi hesapla bagli tutar.",
-    chipOne: "Duzenli belirti kaydi",
-    chipTwo: "Olculu aciliyet uyarisi",
-    noteTitle: "Gercek kullanim icin tasarlandi",
+      "Asistan odaklı takip soruları sorar, yanıtları canlı akar şekilde yazar ve tüm görüşmeyi hesapla bağlı tutar.",
+    chipOne: "Düzenli belirti kaydı",
+    chipTwo: "Ölçülü aciliyet uyarısı",
+    noteTitle: "Gerçek kullanım için tasarlandı",
     noteBody:
-      "Kaldigin yerden devam et, yanitlari ayni akista gor ve gecmisi karmasik degil okunabilir tut. Kullanici her geri geldiginde hikayesini bastan kurmak zorunda kalmamali.",
-    paragraphCardTitle: "Neden bu ilk ekran onemli",
+      "Kaldığın yerden devam et, yanıtları aynı akışta gör ve geçmişi karmaşık değil, okunabilir tut. Kullanıcı her geri geldiğinde hikâyesini baştan kurmak zorunda kalmamalı.",
+    paragraphCardTitle: "Neden bu ilk ekran önemli",
     paragraphCardBody:
-      "Tibbi on gorusme urunu, ilk mesaj atilmadan once bile guven vermelidir. Bu da net dil, gorunen bir duzen ve abartili degil olculu bir ton gerektirir.",
+      "Tıbbi ön görüşme ürünü, ilk mesaj atılmadan önce bile güven vermelidir. Bu da net dil, görünen bir düzen ve abartılı değil, ölçülü bir ton gerektirir.",
   },
 } satisfies Record<AppLanguage, {
   heroTitle: string;
@@ -145,7 +145,9 @@ export function HomeClient() {
                 </div>
 
                 <div className="rounded-[2rem] border border-[rgba(24,32,24,0.08)] bg-[#1f3e33] p-5 text-[#f6f2ea] shadow-[0_24px_60px_rgba(22,34,29,0.24)]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b9d3c8]">Session feel</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b9d3c8]">
+                    {language === "tr" ? "Görüşme hissi" : "Session feel"}
+                  </p>
                   <p className="mt-3 font-[var(--font-display)] text-3xl leading-tight">
                     {wc.sessionTitle}
                   </p>

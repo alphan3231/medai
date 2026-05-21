@@ -109,8 +109,12 @@ export function AuthPanel({
         </form>
 
         <div className="rounded-[1.6rem] border border-[rgba(24,32,24,0.08)] bg-white/72 p-4 text-sm leading-6 text-[#5c665d]">
-          <p className="font-semibold text-[#182018]">Secure entry</p>
-          <p className="mt-1">Your chat history stays linked to your account so you can reopen previous intake sessions anytime.</p>
+          <p className="font-semibold text-[#182018]">{language === "tr" ? "Güvenli giriş" : "Secure entry"}</p>
+          <p className="mt-1">
+            {language === "tr"
+              ? "Sohbet geçmişin hesabına bağlı kalır; böylece önceki ön görüşmelerini istediğin zaman yeniden açabilirsin."
+              : "Your chat history stays linked to your account so you can reopen previous intake sessions anytime."}
+          </p>
         </div>
 
         <button
