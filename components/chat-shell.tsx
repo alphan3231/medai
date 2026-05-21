@@ -422,8 +422,8 @@ export function ChatShell({
 
   return (
     <div className="h-screen overflow-hidden px-4 py-6 md:px-6">
-      <div className="mx-auto grid h-[calc(100vh-3rem)] max-w-7xl gap-4 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="glass-panel grain flex min-h-0 flex-col overflow-hidden rounded-[2rem] p-5">
+      <div className="mx-auto grid h-[calc(100vh-3rem)] max-w-7xl items-stretch gap-4 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="glass-panel grain flex h-full min-h-0 flex-col overflow-hidden rounded-[2rem] p-5">
           <div className="space-y-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -463,7 +463,7 @@ export function ChatShell({
             </Button>
           </div>
 
-          <div className="mt-6 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="mt-6 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-y-contain pr-1">
             {sessions.length ? (
               sessions.map((session) => (
                 <button
@@ -507,7 +507,7 @@ export function ChatShell({
           </div>
         </aside>
 
-        <main className="glass-panel grain flex min-h-0 flex-col overflow-hidden rounded-[2rem]">
+        <main className="glass-panel grain flex h-full min-h-0 flex-col overflow-hidden rounded-[2rem]">
           <div className="flex flex-col gap-4 border-b border-[rgba(24,32,24,0.08)] px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl space-y-3">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#245946]">{t.intakeBadge}</p>
@@ -532,7 +532,7 @@ export function ChatShell({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-6">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain px-6 py-6">
             {error ? (
               <div className="rounded-[1.5rem] border border-[#b4533f]/20 bg-[#fff2eb] px-4 py-3 text-sm text-[#8f3e2f]">
                 {error}
