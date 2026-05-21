@@ -30,30 +30,23 @@ function buildInput({
   return [
     {
       role: "system" as const,
-      content: [
-        {
-          type: "input_text" as const,
-          text: buildSystemPrompt(language, warningLevel),
-        },
-      ],
+      content: buildSystemPrompt(language, warningLevel),
     },
-    ...history.map((item) => ({
-      role: item.role,
-      content: [
-        {
-          type: "input_text" as const,
-          text: item.content,
-        },
-      ],
-    })),
+    ...history.map((item) =>
+      item.role === "assistant"
+        ? {
+            role: "assistant" as const,
+            phase: "final_answer" as const,
+            content: item.content,
+          }
+        : {
+            role: "user" as const,
+            content: item.content,
+          },
+    ),
     {
       role: "user" as const,
-      content: [
-        {
-          type: "input_text" as const,
-          text: message,
-        },
-      ],
+      content: message,
     },
   ];
 }
