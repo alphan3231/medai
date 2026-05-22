@@ -1,6 +1,5 @@
 import "server-only";
 
-import { adminStorage } from "@/lib/firebase/admin";
 import {
   isAllowedAttachmentMimeType,
   isChatAttachmentPathForUserChat,
@@ -22,9 +21,10 @@ function downloadUrlMatchesStoragePath(downloadUrl: string | null | undefined, s
   try {
     const parsedUrl = new URL(downloadUrl);
     const expectedEncodedPath = encodeURIComponent(storagePath);
-    const bucketName = adminStorage.bucket().name;
+    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
     return (
+      Boolean(bucketName) &&
       parsedUrl.hostname === "firebasestorage.googleapis.com" &&
       parsedUrl.pathname === `/v0/b/${bucketName}/o/${expectedEncodedPath}` &&
       parsedUrl.searchParams.get("alt") === "media" &&
@@ -70,42 +70,23 @@ export async function validateChatAttachmentsForUser({
         throw new Error("Attachment download URL could not be verified.");
       }
 
-      const file = adminStorage.bucket().file(attachment.storagePath);
-      const [exists] = await file.exists();
-      if (!exists) {
-        throw new Error("Attachment file was not found.");
-      }
-
-      const [metadata] = await file.getMetadata();
-      const contentType = metadata.contentType ?? "";
-      const sizeBytes = Number.parseInt(String(metadata.size ?? "0"), 10);
-      const customMetadata = metadata.metadata ?? {};
-      const fileName =
-        typeof customMetadata.fileName === "string" && customMetadata.fileName.trim()
-          ? customMetadata.fileName
-          : attachment.fileName;
-
-      if (!isAllowedAttachmentMimeType(contentType)) {
+      if (!isAllowedAttachmentMimeType(attachment.mimeType)) {
         throw new Error("Attachment file type is not allowed.");
       }
 
-      if (sizeBytes > MAX_ATTACHMENT_BYTES) {
+      if (attachment.sizeBytes > MAX_ATTACHMENT_BYTES) {
         throw new Error("Attachment file is too large.");
-      }
-
-      if (customMetadata.userId !== userId || customMetadata.chatId !== chatId || customMetadata.attachmentId !== attachment.id) {
-        throw new Error("Attachment ownership could not be verified.");
       }
 
       return {
         id: attachment.id,
         storagePath: attachment.storagePath,
-        mimeType: contentType,
-        fileName,
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
         downloadUrl: attachment.downloadUrl,
-        sizeBytes,
-        width: toPositiveInteger(customMetadata.width, attachment.width),
-        height: toPositiveInteger(customMetadata.height, attachment.height),
+        sizeBytes: attachment.sizeBytes,
+        width: toPositiveInteger(attachment.width, 0),
+        height: toPositiveInteger(attachment.height, 0),
         kind: attachment.kind,
       } satisfies ChatAttachment;
     }),
