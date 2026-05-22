@@ -43,6 +43,7 @@ type CopyShape = {
   rateLimitError: string;
   attachmentButton: string;
   attachmentHint: string;
+  attachmentShortcutHint: string;
   attachmentSymptom: string;
   attachmentXray: string;
   attachmentRemove: string;
@@ -114,6 +115,7 @@ export const copy: Record<AppLanguage, CopyShape> = {
     attachmentButton: "Add photos",
     attachmentHint:
       "Photos are used only to support symptom intake and follow-up questions. They do not replace clinician review.",
+    attachmentShortcutHint: "Click, paste, or drag images into the composer.",
     attachmentSymptom: "Symptom photo",
     attachmentXray: "X-ray",
     attachmentRemove: "Remove",
@@ -184,6 +186,7 @@ export const copy: Record<AppLanguage, CopyShape> = {
     attachmentButton: "Fotoğraf ekle",
     attachmentHint:
       "Fotoğraflar yalnızca belirti değerlendirmesini ve takip sorularını desteklemek için kullanılır. Klinik değerlendirmenin yerini tutmaz.",
+    attachmentShortcutHint: "Görselleri tıkla, yapıştır ya da sürükleyip bırak.",
     attachmentSymptom: "Belirti fotoğrafı",
     attachmentXray: "Röntgen",
     attachmentRemove: "Kaldır",

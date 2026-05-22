@@ -1,6 +1,16 @@
 "use client";
 
-import { type FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ClipboardEvent,
+  type DragEvent,
+  type FormEvent,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { User } from "firebase/auth";
 import { signOut } from "firebase/auth";
 import { deleteObject, ref, uploadBytesResumable, type UploadTask } from "firebase/storage";
@@ -285,8 +295,10 @@ export function ChatShell({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadTasksRef = useRef<Record<string, UploadTask>>({});
   const composerAttachmentsRef = useRef<ComposerAttachment[]>([]);
+  const dragDepthRef = useRef(0);
   const shouldStickToBottomRef = useRef(true);
   const pendingInitialScrollRef = useRef(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const activeSession = sessions.find((item) => item.id === activeChatId) ?? null;
   const warningCopy = getWarningCopy(language, activeSession?.warningLevel ?? "none");
@@ -333,6 +345,11 @@ export function ChatShell({
     revokeComposerPreviews(attachments);
     setComposerAttachments([]);
     uploadTasksRef.current = {};
+  }
+
+  function resetDragState() {
+    dragDepthRef.current = 0;
+    setDragActive(false);
   }
 
   function scrollChatToBottom() {
@@ -666,20 +683,19 @@ export function ChatShell({
     shouldStickToBottomRef.current = true;
   }
 
-  async function handleFilesSelected(fileList: FileList | null) {
-    if (!fileList?.length) {
+  async function handleSelectedFiles(files: File[]) {
+    if (!files.length) {
       return;
     }
 
-    const selectedFiles = Array.from(fileList);
     const availableSlots = MAX_ATTACHMENTS_PER_MESSAGE - composerAttachments.length;
     if (availableSlots <= 0) {
       setError(t.attachmentCountError);
       return;
     }
 
-    const limitedFiles = selectedFiles.slice(0, availableSlots);
-    if (selectedFiles.length > limitedFiles.length) {
+    const limitedFiles = files.slice(0, availableSlots);
+    if (files.length > limitedFiles.length) {
       setError(t.attachmentCountError);
     }
 
@@ -773,6 +789,77 @@ export function ChatShell({
         },
       );
     }
+  }
+
+  async function handleFilesSelected(fileList: FileList | null) {
+    if (!fileList?.length) {
+      return;
+    }
+
+    await handleSelectedFiles(Array.from(fileList));
+  }
+
+  async function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+
+    if (!imageFiles.length) {
+      return;
+    }
+
+    event.preventDefault();
+    await handleSelectedFiles(imageFiles);
+  }
+
+  function handleComposerDragEnter(event: DragEvent<HTMLFormElement>) {
+    const hasFiles = Array.from(event.dataTransfer.items).some((item) => item.kind === "file");
+    if (!hasFiles) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLFormElement>) {
+    const hasFiles = Array.from(event.dataTransfer.items).some((item) => item.kind === "file");
+    if (!hasFiles) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!dragActive) {
+      setDragActive(true);
+    }
+  }
+
+  function handleComposerDragLeave(event: DragEvent<HTMLFormElement>) {
+    const hasFiles = Array.from(event.dataTransfer.items).some((item) => item.kind === "file");
+    if (!hasFiles) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setDragActive(false);
+    }
+  }
+
+  async function handleComposerDrop(event: DragEvent<HTMLFormElement>) {
+    const droppedFiles = Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
+    event.preventDefault();
+    resetDragState();
+
+    if (!droppedFiles.length) {
+      return;
+    }
+
+    await handleSelectedFiles(droppedFiles);
   }
 
   function updateComposerAttachmentKind(attachmentId: string, kind: ChatAttachmentKind) {
@@ -1024,7 +1111,18 @@ export function ChatShell({
           </div>
 
           <div className="border-t border-[rgba(24,32,24,0.08)] px-6 py-5">
-            <form className="space-y-3" onSubmit={handleSubmit}>
+            <form
+              className={`space-y-3 rounded-[1.6rem] p-2 transition ${
+                dragActive ? "bg-[#eef7f1] ring-2 ring-[#245946]/18" : ""
+              }`}
+              onDragEnter={handleComposerDragEnter}
+              onDragLeave={handleComposerDragLeave}
+              onDragOver={handleComposerDragOver}
+              onDrop={(event) => {
+                void handleComposerDrop(event);
+              }}
+              onSubmit={handleSubmit}
+            >
               {conversationHasXray ? (
                 <div className="rounded-[1.35rem] border border-[#245946]/12 bg-[#eef7f1] px-4 py-3 text-sm leading-6 text-[#245946]">
                   <p className="font-semibold">{t.xrayNoticeTitle}</p>
@@ -1084,6 +1182,9 @@ export function ChatShell({
               ) : null}
               <Textarea
                 onChange={(event) => setInput(event.target.value)}
+                onPaste={(event) => {
+                  void handleComposerPaste(event);
+                }}
                 placeholder={t.composerPlaceholder}
                 value={input}
               />
@@ -1120,6 +1221,7 @@ export function ChatShell({
                 </Button>
               </div>
               <p className="text-xs leading-5 text-[#748076]">{t.attachmentHint}</p>
+              <p className="text-xs leading-5 text-[#748076]">{t.attachmentShortcutHint}</p>
               <p className="text-xs leading-5 text-[#748076]">{t.quotaHint}</p>
             </form>
           </div>
