@@ -41,6 +41,22 @@ type CopyShape = {
   missingKeyError: string;
   quotaHint: string;
   rateLimitError: string;
+  attachmentButton: string;
+  attachmentHint: string;
+  attachmentSymptom: string;
+  attachmentXray: string;
+  attachmentRemove: string;
+  attachmentUploading: string;
+  attachmentReady: string;
+  attachmentError: string;
+  attachmentCountError: string;
+  attachmentTypeError: string;
+  attachmentSizeError: string;
+  attachmentUploadError: string;
+  attachmentPendingError: string;
+  attachmentOnlyPrompt: string;
+  xrayNoticeTitle: string;
+  xrayNoticeBody: string;
 };
 
 export const copy: Record<AppLanguage, CopyShape> = {
@@ -95,6 +111,24 @@ export const copy: Record<AppLanguage, CopyShape> = {
       "The server is missing OPENAI_API_KEY. Add it before using the chatbot.",
     quotaHint: "Each account can send up to 5 messages per hour. Unused messages do not carry over.",
     rateLimitError: "You have reached the 5-message hourly limit. Please wait before sending another message.",
+    attachmentButton: "Add photos",
+    attachmentHint:
+      "Photos are used only to support symptom intake and follow-up questions. They do not replace clinician review.",
+    attachmentSymptom: "Symptom photo",
+    attachmentXray: "X-ray",
+    attachmentRemove: "Remove",
+    attachmentUploading: "Uploading",
+    attachmentReady: "Ready",
+    attachmentError: "Upload failed",
+    attachmentCountError: "You can attach up to 4 images per message.",
+    attachmentTypeError: "Only JPG, PNG, and WEBP images are supported.",
+    attachmentSizeError: "Each image must be 8 MB or smaller.",
+    attachmentUploadError: "We could not upload one of the images. Remove it and try again.",
+    attachmentPendingError: "Wait for uploads to finish or remove failed images before sending.",
+    attachmentOnlyPrompt: "Send a symptom note or one or more images to start the intake.",
+    xrayNoticeTitle: "X-ray safety note",
+    xrayNoticeBody:
+      "X-ray images are treated as context only. MedAI should not replace clinician or radiology review.",
   },
   tr: {
     appName: "MedAI",
@@ -147,6 +181,24 @@ export const copy: Record<AppLanguage, CopyShape> = {
       "Sunucuda OPENAI_API_KEY ayarlı değil. Chatbotu kullanmadan önce ekle.",
     quotaHint: "Her hesap saatte en fazla 5 mesaj gönderebilir. Kullanılmayan haklar birikmez.",
     rateLimitError: "Saatlik 5 mesaj sınırına ulaştın. Yeni mesaj göndermeden önce biraz bekle.",
+    attachmentButton: "Fotoğraf ekle",
+    attachmentHint:
+      "Fotoğraflar yalnızca belirti değerlendirmesini ve takip sorularını desteklemek için kullanılır. Klinik değerlendirmenin yerini tutmaz.",
+    attachmentSymptom: "Belirti fotoğrafı",
+    attachmentXray: "Röntgen",
+    attachmentRemove: "Kaldır",
+    attachmentUploading: "Yükleniyor",
+    attachmentReady: "Hazır",
+    attachmentError: "Yükleme başarısız",
+    attachmentCountError: "Bir mesaja en fazla 4 görsel ekleyebilirsin.",
+    attachmentTypeError: "Yalnızca JPG, PNG ve WEBP görseller desteklenir.",
+    attachmentSizeError: "Her görsel en fazla 8 MB olabilir.",
+    attachmentUploadError: "Görsellerden biri yüklenemedi. Kaldırıp tekrar dene.",
+    attachmentPendingError: "Göndermeden önce yüklemelerin bitmesini bekle ya da hatalı görselleri kaldır.",
+    attachmentOnlyPrompt: "Ön görüşmeyi başlatmak için belirti notu ya da bir veya daha fazla görsel gönder.",
+    xrayNoticeTitle: "Röntgen güvenlik notu",
+    xrayNoticeBody:
+      "Röntgen görüntüleri yalnızca bağlamsal destek olarak kullanılır. MedAI klinik veya radyoloji değerlendirmesinin yerini almamalıdır.",
   },
 };
 

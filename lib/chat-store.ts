@@ -1,7 +1,8 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
-import type { AppLanguage, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
+import { stripAttachmentRenderUrls } from "@/lib/chat-attachments";
+import type { AppLanguage, ChatAttachment, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
 
 function serializeDate(value: Timestamp | string | null | undefined) {
   if (!value) {
@@ -168,6 +169,7 @@ export async function getChatMessages(userId: string, chatId: string): Promise<C
       userId: data.userId,
       role: data.role,
       content: data.content,
+      attachments: data.attachments ?? [],
       language: data.language,
       warningLevel: data.warningLevel ?? "none",
       warningText: data.warningText ?? null,
@@ -199,6 +201,7 @@ export async function getRecentMessages(userId: string, chatId: string, limit = 
         userId: data.userId,
         role: data.role,
         content: data.content,
+        attachments: data.attachments ?? [],
         language: data.language,
         warningLevel: data.warningLevel ?? "none",
         warningText: data.warningText ?? null,
@@ -209,17 +212,19 @@ export async function getRecentMessages(userId: string, chatId: string, limit = 
 }
 
 export async function createChatSession({
+  chatId,
   userId,
   language,
   firstMessage,
   warningLevel,
 }: {
+  chatId?: string;
   userId: string;
   language: AppLanguage;
   firstMessage: string;
   warningLevel: MedicalWarningLevel;
 }) {
-  const ref = adminDb.collection("chats").doc();
+  const ref = chatId ? adminDb.collection("chats").doc(chatId) : adminDb.collection("chats").doc();
   const payload = {
     userId,
     title: buildTitle(firstMessage),
@@ -240,6 +245,7 @@ export async function appendMessage({
   userId,
   role,
   content,
+  attachments,
   language,
   warningLevel,
   warningText,
@@ -248,6 +254,7 @@ export async function appendMessage({
   userId: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
   language: AppLanguage;
   warningLevel: MedicalWarningLevel;
   warningText?: string | null;
@@ -258,6 +265,7 @@ export async function appendMessage({
     userId,
     role,
     content,
+    attachments: attachments?.length ? stripAttachmentRenderUrls(attachments) : [],
     language,
     warningLevel,
     warningText: warningText ?? null,

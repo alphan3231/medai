@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chat-attachments";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   appendMessage,
@@ -15,7 +16,8 @@ import { extractFollowUp } from "@/lib/follow-up";
 import { copy, getWarningCopy } from "@/lib/i18n";
 import { detectMedicalWarning } from "@/lib/medical";
 import { streamMedicalReply } from "@/lib/openai";
-import type { AppLanguage, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
+import { hydrateAttachmentsWithSignedUrls, validateChatAttachmentsForUser } from "@/lib/storage";
+import type { AppLanguage, ChatAttachment, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,8 +25,31 @@ export const revalidate = 0;
 
 const payloadSchema = z.object({
   chatId: z.string().trim().min(1).optional().nullable(),
-  message: z.string().trim().min(1).max(4000),
+  message: z.string().trim().max(4000),
   language: z.enum(["en", "tr"]),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(120),
+        storagePath: z.string().trim().min(1).max(512),
+        mimeType: z.string().trim().min(1).max(120),
+        fileName: z.string().trim().min(1).max(160),
+        sizeBytes: z.number().int().nonnegative(),
+        width: z.number().int().nonnegative(),
+        height: z.number().int().nonnegative(),
+        kind: z.enum(["symptom_photo", "xray_like"]),
+      }),
+    )
+    .max(MAX_ATTACHMENTS_PER_MESSAGE)
+    .default([]),
+}).superRefine((payload, context) => {
+  if (!payload.message && !payload.attachments.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Message text or at least one attachment is required.",
+      path: ["message"],
+    });
+  }
 });
 
 type StartEvent = {
@@ -92,6 +117,7 @@ function buildMessageShape({
   userId,
   role,
   content,
+  attachments,
   language,
   warningLevel,
   warningText,
@@ -101,6 +127,7 @@ function buildMessageShape({
   userId: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
   language: AppLanguage;
   warningLevel: MedicalWarningLevel;
   warningText?: string | null;
@@ -111,6 +138,7 @@ function buildMessageShape({
     userId,
     role,
     content,
+    attachments: attachments ?? [],
     language,
     warningLevel,
     warningText: warningText ?? null,
@@ -181,27 +209,36 @@ export async function POST(request: Request) {
 
     if (!chatId || !session) {
       chatId = await createChatSession({
+        chatId,
         userId: user.uid,
         language: payload.language,
-        firstMessage: payload.message,
+        firstMessage: payload.message || "Image-supported intake",
         warningLevel,
       });
       session = buildSessionShape({
         id: chatId,
         userId: user.uid,
         title: payload.message.slice(0, 52) || "New intake",
-        summary: payload.message.slice(0, 120),
+        summary: payload.message.slice(0, 120) || "Image-supported intake in progress.",
         language: payload.language,
         warningLevel,
-        preview: payload.message.slice(0, 140),
+        preview: payload.message.slice(0, 140) || "Image-supported intake",
       });
     }
+
+    const validatedAttachments = await validateChatAttachmentsForUser({
+      userId: user.uid,
+      chatId,
+      attachments: payload.attachments,
+    });
+    const hydratedAttachments = await hydrateAttachmentsWithSignedUrls(validatedAttachments);
 
     const userMessageId = await appendMessage({
       chatId,
       userId: user.uid,
       role: "user",
       content: payload.message,
+      attachments: validatedAttachments,
       language: payload.language,
       warningLevel,
     });
@@ -211,8 +248,8 @@ export async function POST(request: Request) {
       session,
       language: payload.language,
       warningLevel,
-      summary: payload.message,
-      preview: payload.message,
+      summary: payload.message || "Image-supported intake",
+      preview: payload.message || "Image-supported intake",
     });
 
     const encoder = new TextEncoder();
@@ -239,6 +276,7 @@ export async function POST(request: Request) {
               userId: user.uid,
               role: "user",
               content: payload.message,
+              attachments: hydratedAttachments,
               language: payload.language,
               warningLevel,
             }),
@@ -254,6 +292,7 @@ export async function POST(request: Request) {
 
           for await (const delta of streamMedicalReply({
             message: payload.message,
+            attachments: hydratedAttachments,
             language: payload.language,
             history: recentHistory.filter((item) => item.id !== userMessageId),
             warningLevel,
@@ -296,7 +335,7 @@ export async function POST(request: Request) {
             language: payload.language,
             warningLevel,
             preview: cleanedAssistantText,
-            summary: payload.message,
+            summary: payload.message || "Image-supported intake",
           });
 
           send("done", {
@@ -305,7 +344,7 @@ export async function POST(request: Request) {
               session: startingSession,
               language: payload.language,
               warningLevel,
-              summary: payload.message,
+              summary: payload.message || "Image-supported intake",
               preview: cleanedAssistantText,
             }),
             assistantMessage: buildMessageShape({
@@ -314,6 +353,7 @@ export async function POST(request: Request) {
               userId: user.uid,
               role: "assistant",
               content: finalizedAssistantText,
+              attachments: [],
               language: payload.language,
               warningLevel,
               warningText,

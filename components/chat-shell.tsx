@@ -3,12 +3,32 @@
 import { type FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { signOut } from "firebase/auth";
-import { AlertTriangle, Languages, LogOut, MessageSquarePlus, ShieldAlert, Sparkles } from "lucide-react";
+import { deleteObject, ref, uploadBytesResumable, type UploadTask } from "firebase/storage";
+import {
+  AlertTriangle,
+  ImagePlus,
+  Languages,
+  LoaderCircle,
+  LogOut,
+  MessageSquarePlus,
+  ShieldAlert,
+  Sparkles,
+  X,
+} from "lucide-react";
 
-import { auth } from "@/lib/firebase/client";
+import {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  buildChatAttachmentStoragePath,
+  describeAttachmentKind,
+  isXrayAttachmentKind,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BYTES,
+  messageHasXrayAttachment,
+} from "@/lib/chat-attachments";
+import { auth, storage } from "@/lib/firebase/client";
 import { extractFollowUp, type FollowUpSuggestion } from "@/lib/follow-up";
 import { copy, getWarningCopy } from "@/lib/i18n";
-import type { AppLanguage, ChatMessage, ChatSession } from "@/lib/types";
+import type { AppLanguage, ChatAttachment, ChatAttachmentKind, ChatMessage, ChatSession } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +51,13 @@ type DonePayload = {
   chatId: string;
   session: ChatSession;
   assistantMessage: ChatMessage;
+};
+
+type ComposerAttachment = ChatAttachment & {
+  previewUrl: string;
+  progress: number;
+  status: "uploading" | "ready" | "error";
+  errorMessage?: string;
 };
 
 type ChatStreamEvent =
@@ -58,13 +85,19 @@ type ChatStreamEvent =
       };
     };
 
-function buildOptimisticUserMessage(message: string, userId: string, language: AppLanguage): ChatMessage {
+function buildOptimisticUserMessage(
+  message: string,
+  userId: string,
+  language: AppLanguage,
+  attachments: ChatAttachment[] = [],
+): ChatMessage {
   return {
     id: OPTIMISTIC_USER_ID,
     chatId: "",
     userId,
     role: "user",
     content: message,
+    attachments,
     language,
     warningLevel: "none",
     warningText: null,
@@ -79,11 +112,85 @@ function buildStreamingAssistantMessage(language: AppLanguage): ChatMessage {
     userId: "",
     role: "assistant",
     content: "",
+    attachments: [],
     language,
     warningLevel: "none",
     warningText: null,
     createdAt: new Date().toISOString(),
   };
+}
+
+async function loadImageDimensions(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => reject(new Error("Unable to read image dimensions."));
+      image.src = objectUrl;
+    });
+
+    return dimensions;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function AttachmentGallery({
+  attachments,
+  language,
+  tone,
+}: {
+  attachments: ChatAttachment[];
+  language: AppLanguage;
+  tone: "user" | "assistant";
+}) {
+  if (!attachments.length) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 grid gap-3 sm:grid-cols-2">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className={`overflow-hidden rounded-[1.3rem] border ${
+            tone === "user"
+              ? "border-white/15 bg-white/10"
+              : "border-[rgba(24,32,24,0.08)] bg-[#f7faf8]"
+          }`}
+        >
+          {attachment.downloadUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt={attachment.fileName}
+              className="h-40 w-full object-cover"
+              src={attachment.downloadUrl}
+            />
+          ) : (
+            <div className="flex h-40 items-center justify-center text-sm text-[#748076]">
+              {attachment.fileName}
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3 px-3 py-3 text-xs">
+            <span
+              className={`rounded-full px-2.5 py-1 font-semibold ${
+                tone === "user"
+                  ? "bg-white/12 text-white"
+                  : "bg-white text-[#245946]"
+              }`}
+            >
+              {describeAttachmentKind(attachment.kind, language)}
+            </span>
+            <span className={tone === "user" ? "text-white/80" : "text-[#748076]"}>
+              {Math.max(1, Math.round(attachment.sizeBytes / 1024))} KB
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function parseSseFrame(frame: string): ChatStreamEvent | null {
@@ -172,7 +279,12 @@ export function ChatShell({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [streamingFollowUp, setStreamingFollowUp] = useState<FollowUpSuggestion | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [draftChatId, setDraftChatId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadTasksRef = useRef<Record<string, UploadTask>>({});
+  const composerAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const shouldStickToBottomRef = useRef(true);
   const pendingInitialScrollRef = useRef(false);
 
@@ -184,6 +296,44 @@ export function ChatShell({
     ? extractFollowUp(streamingAssistantMessage.content).body.trim()
     : "";
   const showStandaloneStreamingBubble = sending && !streamingAssistantBody;
+  const activeComposerChatId = activeChatId ?? draftChatId;
+  const hasBlockingAttachmentState = composerAttachments.some((attachment) => attachment.status !== "ready");
+  const conversationHasXray =
+    composerAttachments.some((attachment) => isXrayAttachmentKind(attachment.kind)) ||
+    messages.some((message) => messageHasXrayAttachment(message.attachments));
+
+  function ensureDraftChatId() {
+    if (activeChatId) {
+      return activeChatId;
+    }
+
+    if (draftChatId) {
+      return draftChatId;
+    }
+
+    const nextDraftChatId = window.crypto.randomUUID();
+    setDraftChatId(nextDraftChatId);
+    return nextDraftChatId;
+  }
+
+  function revokeComposerPreviews(attachments: ComposerAttachment[]) {
+    attachments.forEach((attachment) => {
+      URL.revokeObjectURL(attachment.previewUrl);
+    });
+  }
+
+  function clearComposerAttachments(attachments: ComposerAttachment[] = composerAttachments) {
+    Object.values(uploadTasksRef.current).forEach((task) => {
+      try {
+        task.cancel();
+      } catch {
+        // Best effort cleanup only.
+      }
+    });
+    revokeComposerPreviews(attachments);
+    setComposerAttachments([]);
+    uploadTasksRef.current = {};
+  }
 
   function scrollChatToBottom() {
     const element = chatScrollRef.current;
@@ -248,8 +398,10 @@ export function ChatShell({
 
   async function loadConversation(chatId: string) {
     setActiveChatId(chatId);
+    setDraftChatId(null);
     setLoadingHistory(true);
     setError("");
+    clearComposerAttachments();
     pendingInitialScrollRef.current = true;
     shouldStickToBottomRef.current = true;
 
@@ -282,6 +434,16 @@ export function ChatShell({
     return () => window.clearTimeout(timeout);
   }, [user.uid]);
 
+  useEffect(() => {
+    composerAttachmentsRef.current = composerAttachments;
+  }, [composerAttachments]);
+
+  useEffect(() => {
+    return () => {
+      revokeComposerPreviews(composerAttachmentsRef.current);
+    };
+  }, []);
+
   useLayoutEffect(() => {
     if (pendingInitialScrollRef.current) {
       scrollChatToBottom();
@@ -296,19 +458,53 @@ export function ChatShell({
   }, [activeChatId, messages, showStandaloneStreamingBubble]);
 
   async function submitMessage(rawMessage: string) {
-    if (!rawMessage.trim() || sending) {
+    if (sending) {
       return;
     }
 
     const nextInput = rawMessage.trim();
+    const readyAttachments = composerAttachments
+      .filter((attachment) => attachment.status === "ready")
+      .map<ChatAttachment>((attachment) => ({
+        id: attachment.id,
+        storagePath: attachment.storagePath,
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
+        sizeBytes: attachment.sizeBytes,
+        width: attachment.width,
+        height: attachment.height,
+        kind: attachment.kind,
+      }));
+
+    if ((!nextInput && !readyAttachments.length) || hasBlockingAttachmentState) {
+      setError(hasBlockingAttachmentState ? t.attachmentPendingError : t.attachmentOnlyPrompt);
+      return;
+    }
+
+    const previewAttachments = composerAttachments
+      .filter((attachment) => attachment.status === "ready")
+      .map<ChatAttachment>((attachment) => ({
+        id: attachment.id,
+        storagePath: attachment.storagePath,
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
+        sizeBytes: attachment.sizeBytes,
+        width: attachment.width,
+        height: attachment.height,
+        kind: attachment.kind,
+        downloadUrl: attachment.previewUrl,
+      }));
+    const outgoingChatId = activeComposerChatId ?? ensureDraftChatId();
+    const outgoingComposerAttachments = composerAttachments;
     setSending(true);
     setError("");
     setInput("");
     setStreamingFollowUp(null);
+    setComposerAttachments([]);
     shouldStickToBottomRef.current = true;
     setMessages((current) => [
       ...current,
-      buildOptimisticUserMessage(nextInput, user.uid, language),
+      buildOptimisticUserMessage(nextInput, user.uid, language, previewAttachments),
       buildStreamingAssistantMessage(language),
     ]);
 
@@ -316,9 +512,10 @@ export function ChatShell({
       const response = await authorizedFetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({
-          chatId: activeChatId,
+          chatId: outgoingChatId,
           message: nextInput,
           language,
+          attachments: readyAttachments,
         }),
       });
 
@@ -342,6 +539,7 @@ export function ChatShell({
 
         if (eventPayload.event === "start") {
           setActiveChatId(eventPayload.payload.chatId);
+          setDraftChatId(eventPayload.payload.chatId);
           setSessions((current) => [
             eventPayload.payload.session,
             ...current.filter((item) => item.id !== eventPayload.payload.session.id),
@@ -387,6 +585,7 @@ export function ChatShell({
 
         if (eventPayload.event === "done") {
           setActiveChatId(eventPayload.payload.chatId);
+          setDraftChatId(eventPayload.payload.chatId);
           setSessions((current) => [
             eventPayload.payload.session,
             ...current.filter((item) => item.id !== eventPayload.payload.session.id),
@@ -432,6 +631,8 @@ export function ChatShell({
           applyStreamEvent(parsedEvent);
         }
       }
+
+      revokeComposerPreviews(outgoingComposerAttachments);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : t.genericError;
       setMessages((current) =>
@@ -439,6 +640,7 @@ export function ChatShell({
           (item) => item.id !== OPTIMISTIC_USER_ID && item.id !== STREAMING_ASSISTANT_ID,
         ),
       );
+      setComposerAttachments(outgoingComposerAttachments);
       setStreamingFollowUp(null);
       setInput(nextInput);
       setError(message.includes("OPENAI_API_KEY") ? t.missingKeyError : message);
@@ -454,12 +656,153 @@ export function ChatShell({
 
   function startNewChat() {
     setActiveChatId(null);
+    setDraftChatId(null);
     setMessages([]);
     setStreamingFollowUp(null);
     setError("");
     setInput("");
+    clearComposerAttachments();
     pendingInitialScrollRef.current = false;
     shouldStickToBottomRef.current = true;
+  }
+
+  async function handleFilesSelected(fileList: FileList | null) {
+    if (!fileList?.length) {
+      return;
+    }
+
+    const selectedFiles = Array.from(fileList);
+    const availableSlots = MAX_ATTACHMENTS_PER_MESSAGE - composerAttachments.length;
+    if (availableSlots <= 0) {
+      setError(t.attachmentCountError);
+      return;
+    }
+
+    const limitedFiles = selectedFiles.slice(0, availableSlots);
+    if (selectedFiles.length > limitedFiles.length) {
+      setError(t.attachmentCountError);
+    }
+
+    const workingChatId = ensureDraftChatId();
+
+    for (const file of limitedFiles) {
+      if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(file.type as (typeof ALLOWED_ATTACHMENT_MIME_TYPES)[number])) {
+        setError(t.attachmentTypeError);
+        continue;
+      }
+
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setError(t.attachmentSizeError);
+        continue;
+      }
+
+      const attachmentId = window.crypto.randomUUID();
+      const previewUrl = URL.createObjectURL(file);
+      const { width, height } = await loadImageDimensions(file);
+      const storagePath = buildChatAttachmentStoragePath({
+        userId: user.uid,
+        chatId: workingChatId,
+        attachmentId,
+        fileName: file.name,
+      });
+
+      const nextAttachment: ComposerAttachment = {
+        id: attachmentId,
+        storagePath,
+        mimeType: file.type,
+        fileName: file.name,
+        sizeBytes: file.size,
+        width,
+        height,
+        kind: "symptom_photo",
+        previewUrl,
+        progress: 0,
+        status: "uploading",
+      };
+
+      setComposerAttachments((current) => [...current, nextAttachment]);
+
+      const storageTask = uploadBytesResumable(ref(storage, storagePath), file, {
+        contentType: file.type,
+        customMetadata: {
+          userId: user.uid,
+          chatId: workingChatId,
+          attachmentId,
+          fileName: file.name,
+          width: String(width),
+          height: String(height),
+        },
+      });
+      uploadTasksRef.current[attachmentId] = storageTask;
+
+      storageTask.on(
+        "state_changed",
+        (snapshot) => {
+          const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          setComposerAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === attachmentId ? { ...attachment, progress } : attachment,
+            ),
+          );
+        },
+        () => {
+          setComposerAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === attachmentId
+                ? {
+                    ...attachment,
+                    status: "error",
+                    errorMessage: t.attachmentUploadError,
+                  }
+                : attachment,
+            ),
+          );
+        },
+        () => {
+          setComposerAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === attachmentId
+                ? {
+                    ...attachment,
+                    progress: 100,
+                    status: "ready",
+                  }
+                : attachment,
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  function updateComposerAttachmentKind(attachmentId: string, kind: ChatAttachmentKind) {
+    setComposerAttachments((current) =>
+      current.map((attachment) =>
+        attachment.id === attachmentId ? { ...attachment, kind } : attachment,
+      ),
+    );
+  }
+
+  async function removeComposerAttachment(attachmentId: string) {
+    const attachment = composerAttachments.find((item) => item.id === attachmentId);
+    if (!attachment) {
+      return;
+    }
+
+    const uploadTask = uploadTasksRef.current[attachmentId];
+    if (uploadTask && attachment.status === "uploading") {
+      uploadTask.cancel();
+    } else if (attachment.status === "ready") {
+      try {
+        await deleteObject(ref(storage, attachment.storagePath));
+      } catch {
+        // Best effort cleanup only.
+      }
+    }
+
+    delete uploadTasksRef.current[attachmentId];
+    URL.revokeObjectURL(attachment.previewUrl);
+    setComposerAttachments((current) => current.filter((item) => item.id !== attachmentId));
   }
 
   return (
@@ -589,6 +932,7 @@ export function ChatShell({
               <div className="rounded-[2rem] border border-dashed border-[rgba(24,32,24,0.12)] bg-white/50 px-6 py-8">
                 <p className="text-lg font-semibold text-[#182018]">{t.chatPlaceholder}</p>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#5c665d]">{t.startPrompt}</p>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-[#748076]">{t.attachmentHint}</p>
               </div>
             ) : null}
 
@@ -617,6 +961,11 @@ export function ChatShell({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
+                      <AttachmentGallery
+                        attachments={message.attachments ?? []}
+                        language={message.language}
+                        tone={message.role}
+                      />
                       <p className="whitespace-pre-wrap text-sm leading-7">{parsedAssistantMessage.body}</p>
                     </div>
                     <span
@@ -676,21 +1025,101 @@ export function ChatShell({
 
           <div className="border-t border-[rgba(24,32,24,0.08)] px-6 py-5">
             <form className="space-y-3" onSubmit={handleSubmit}>
+              {conversationHasXray ? (
+                <div className="rounded-[1.35rem] border border-[#245946]/12 bg-[#eef7f1] px-4 py-3 text-sm leading-6 text-[#245946]">
+                  <p className="font-semibold">{t.xrayNoticeTitle}</p>
+                  <p>{t.xrayNoticeBody}</p>
+                </div>
+              ) : null}
+              {composerAttachments.length ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {composerAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="overflow-hidden rounded-[1.35rem] border border-[rgba(24,32,24,0.08)] bg-white/80"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img alt={attachment.fileName} className="h-36 w-full object-cover" src={attachment.previewUrl} />
+                      <div className="space-y-3 px-3 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#182018]">{attachment.fileName}</p>
+                            <p className="text-xs text-[#748076]">
+                              {attachment.status === "uploading"
+                                ? `${t.attachmentUploading} ${attachment.progress}%`
+                                : attachment.status === "ready"
+                                  ? t.attachmentReady
+                                  : t.attachmentError}
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-full border border-[rgba(24,32,24,0.08)] p-2 text-[#748076] transition hover:bg-white"
+                            onClick={() => void removeComposerAttachment(attachment.id)}
+                            type="button"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(["symptom_photo", "xray_like"] as const).map((kind) => (
+                            <button
+                              key={kind}
+                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                                attachment.kind === kind
+                                  ? "bg-[#245946] text-white"
+                                  : "border border-[rgba(24,32,24,0.08)] bg-white text-[#245946]"
+                              }`}
+                              disabled={attachment.status === "uploading"}
+                              onClick={() => updateComposerAttachmentKind(attachment.id, kind)}
+                              type="button"
+                            >
+                              {kind === "xray_like" ? t.attachmentXray : t.attachmentSymptom}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <Textarea
                 onChange={(event) => setInput(event.target.value)}
                 placeholder={t.composerPlaceholder}
                 value={input}
               />
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs uppercase tracking-[0.2em] text-[#748076]">
-                  {activeSession?.language
-                    ? `${activeSession.language} ${t.sessionLabel}`
-                    : `${language} ${t.sessionLabel}`}
-                </p>
-                <Button disabled={sending || !input.trim()} type="submit">
+                <div className="flex items-center gap-3">
+                  <input
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    multiple
+                    onChange={(event) => {
+                      void handleFilesSelected(event.target.files);
+                      event.currentTarget.value = "";
+                    }}
+                    ref={fileInputRef}
+                    type="file"
+                  />
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-[rgba(24,32,24,0.08)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#245946] transition hover:border-[#245946]/35"
+                    disabled={sending || composerAttachments.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+                    onClick={() => fileInputRef.current?.click()}
+                    type="button"
+                  >
+                    {hasBlockingAttachmentState ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                    {t.attachmentButton}
+                  </button>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[#748076]">
+                    {activeSession?.language
+                      ? `${activeSession.language} ${t.sessionLabel}`
+                      : `${language} ${t.sessionLabel}`}
+                  </p>
+                </div>
+                <Button disabled={sending || (!input.trim() && !composerAttachments.length) || hasBlockingAttachmentState} type="submit">
                   {t.send}
                 </Button>
               </div>
+              <p className="text-xs leading-5 text-[#748076]">{t.attachmentHint}</p>
               <p className="text-xs leading-5 text-[#748076]">{t.quotaHint}</p>
             </form>
           </div>

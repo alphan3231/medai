@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getUserFromRequest } from "@/lib/auth";
 import { ensureUserProfile, getChatMessages, getChatSession } from "@/lib/chat-store";
+import { hydrateChatMessagesWithSignedUrls } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ export async function GET(
       return NextResponse.json({ error: "Chat not found." }, { status: 404 });
     }
 
-    const messages = await getChatMessages(user.uid, chatId);
+    const messages = await hydrateChatMessagesWithSignedUrls(await getChatMessages(user.uid, chatId));
     return NextResponse.json({ session, messages });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load chat.";
