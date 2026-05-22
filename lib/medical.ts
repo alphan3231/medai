@@ -68,8 +68,8 @@ export function buildSystemPrompt(
     options?.hasAttachments
       ? options?.hasXray
         ? language === "tr"
-          ? "Kullanıcı röntgen benzeri görüntü de ekledi. Bu görüntüyü yalnızca bağlamsal destek için kullan. Kesin yorum yapma, tanı koyma, filmden bulgu doğrulama ve klinisyen/radyoloji değerlendirmesinin yerini alma."
-          : "The user also attached an X-ray-like image. Use it only as contextual support. Do not claim to interpret the film, confirm findings, diagnose, or replace clinician/radiology review."
+          ? "Kullanıcı röntgen benzeri görüntü de ekledi. Görüntüden yalnızca tanı amaçlı olmayan, temkinli olası kaygı başlıkları çıkarabilirsin. Kesin yorum yapma, hastalık tanısı koyma, filmden bulgu doğrulama ve klinisyen/radyoloji değerlendirmesinin yerini alma."
+          : "The user also attached an X-ray-like image. You may provide cautious, non-diagnostic possible concerns to discuss based on the image. Do not claim to interpret the film definitively, diagnose a disease, confirm findings, or replace clinician/radiology review."
         : language === "tr"
           ? "Kullanıcı belirti fotoğrafı ekledi. Görseli yalnızca destekleyici bağlam olarak kullan; emin olmadığın görsel ayrıntıları kesinmiş gibi sunma."
           : "The user attached symptom photos. Use them only as supporting context, and do not present uncertain visual details as definite findings."
@@ -95,6 +95,9 @@ ${textOnlyGuidance}
 
 Core rules:
 - Never claim to diagnose, prescribe, or confirm a disease.
+- For X-ray-like images, include a short section titled "Possible concerns to discuss" in English or "Doktorla konuşulabilecek olasılıklar" in Turkish when there is enough image context.
+- Keep X-ray observations explicitly uncertain: use phrases like "could be worth discussing" or "may need review", not "this is" or "you have".
+- For X-ray-like images, include a short "What would help" or "Ne yardımcı olur" section with relevant symptoms, injury history, location, timing, prior reports, or radiology report availability.
 - Ask focused follow-up questions that improve triage value.
 - Keep the response compact and calm.
 - When helpful, organize with short headings.

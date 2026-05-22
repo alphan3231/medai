@@ -130,7 +130,7 @@ export const copy: Record<AppLanguage, CopyShape> = {
     attachmentOnlyPrompt: "Send a symptom note or one or more images to start the intake.",
     xrayNoticeTitle: "X-ray safety note",
     xrayNoticeBody:
-      "X-ray images are treated as context only. MedAI should not replace clinician or radiology review.",
+      "MedAI can surface possible concerns to discuss, but it cannot diagnose from an X-ray or replace clinician/radiology review.",
   },
   tr: {
     appName: "MedAI",
@@ -201,7 +201,7 @@ export const copy: Record<AppLanguage, CopyShape> = {
     attachmentOnlyPrompt: "Ön görüşmeyi başlatmak için belirti notu ya da bir veya daha fazla görsel gönder.",
     xrayNoticeTitle: "Röntgen güvenlik notu",
     xrayNoticeBody:
-      "Röntgen görüntüleri yalnızca bağlamsal destek olarak kullanılır. MedAI klinik veya radyoloji değerlendirmesinin yerini almamalıdır.",
+      "MedAI konuşulabilecek olası kaygıları belirtebilir, ancak röntgenden tanı koyamaz ve klinik/radyoloji değerlendirmesinin yerini alamaz.",
   },
 };
 
