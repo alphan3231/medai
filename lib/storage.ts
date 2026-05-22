@@ -9,47 +9,38 @@ import {
 } from "@/lib/chat-attachments";
 import type { ChatAttachment, ChatMessage } from "@/lib/types";
 
-const SIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000;
-
 function toPositiveInteger(value: unknown, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export async function createSignedAttachmentUrl(storagePath: string) {
-  const [url] = await adminStorage
-    .bucket()
-    .file(storagePath)
-    .getSignedUrl({
-      action: "read",
-      expires: Date.now() + SIGNED_URL_TTL_MS,
-    });
+function downloadUrlMatchesStoragePath(downloadUrl: string | null | undefined, storagePath: string) {
+  if (!downloadUrl) {
+    return false;
+  }
 
-  return url;
+  try {
+    const parsedUrl = new URL(downloadUrl);
+    const expectedEncodedPath = encodeURIComponent(storagePath);
+    const bucketName = adminStorage.bucket().name;
+
+    return (
+      parsedUrl.hostname === "firebasestorage.googleapis.com" &&
+      parsedUrl.pathname === `/v0/b/${bucketName}/o/${expectedEncodedPath}` &&
+      parsedUrl.searchParams.get("alt") === "media" &&
+      Boolean(parsedUrl.searchParams.get("token"))
+    );
+  } catch {
+    return false;
+  }
 }
 
-export async function hydrateAttachmentsWithSignedUrls(attachments: ChatAttachment[]) {
-  return Promise.all(
-    attachments.map(async (attachment) => ({
-      ...attachment,
-      downloadUrl: await createSignedAttachmentUrl(attachment.storagePath),
-    })),
-  );
+export async function hydrateAttachmentsWithDownloadUrls(attachments: ChatAttachment[]) {
+  return attachments;
 }
 
-export async function hydrateChatMessagesWithSignedUrls(messages: ChatMessage[]) {
-  return Promise.all(
-    messages.map(async (message) => {
-      if (!message.attachments?.length) {
-        return message;
-      }
-
-      return {
-        ...message,
-        attachments: await hydrateAttachmentsWithSignedUrls(message.attachments),
-      };
-    }),
-  );
+export async function hydrateChatMessagesWithDownloadUrls(messages: ChatMessage[]) {
+  return messages;
 }
 
 export async function validateChatAttachmentsForUser({
@@ -73,6 +64,10 @@ export async function validateChatAttachmentsForUser({
 
       if (!isAllowedAttachmentMimeType(attachment.mimeType)) {
         throw new Error("Unsupported attachment type.");
+      }
+
+      if (!downloadUrlMatchesStoragePath(attachment.downloadUrl, attachment.storagePath)) {
+        throw new Error("Attachment download URL could not be verified.");
       }
 
       const file = adminStorage.bucket().file(attachment.storagePath);
@@ -107,6 +102,7 @@ export async function validateChatAttachmentsForUser({
         storagePath: attachment.storagePath,
         mimeType: contentType,
         fileName,
+        downloadUrl: attachment.downloadUrl,
         sizeBytes,
         width: toPositiveInteger(customMetadata.width, attachment.width),
         height: toPositiveInteger(customMetadata.height, attachment.height),

@@ -1,7 +1,7 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { stripAttachmentRenderUrls } from "@/lib/chat-attachments";
+import { serializeChatAttachments } from "@/lib/chat-attachments";
 import type { AppLanguage, ChatAttachment, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
 
 function serializeDate(value: Timestamp | string | null | undefined) {
@@ -265,7 +265,7 @@ export async function appendMessage({
     userId,
     role,
     content,
-    attachments: attachments?.length ? stripAttachmentRenderUrls(attachments) : [],
+    attachments: attachments?.length ? serializeChatAttachments(attachments) : [],
     language,
     warningLevel,
     warningText: warningText ?? null,

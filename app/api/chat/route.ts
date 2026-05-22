@@ -16,7 +16,7 @@ import { extractFollowUp } from "@/lib/follow-up";
 import { copy, getWarningCopy } from "@/lib/i18n";
 import { detectMedicalWarning } from "@/lib/medical";
 import { streamMedicalReply } from "@/lib/openai";
-import { hydrateAttachmentsWithSignedUrls, validateChatAttachmentsForUser } from "@/lib/storage";
+import { hydrateAttachmentsWithDownloadUrls, validateChatAttachmentsForUser } from "@/lib/storage";
 import type { AppLanguage, ChatAttachment, ChatMessage, ChatSession, MedicalWarningLevel } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -32,6 +32,7 @@ const payloadSchema = z.object({
       z.object({
         id: z.string().trim().min(1).max(120),
         storagePath: z.string().trim().min(1).max(512),
+        downloadUrl: z.string().url().max(2048),
         mimeType: z.string().trim().min(1).max(120),
         fileName: z.string().trim().min(1).max(160),
         sizeBytes: z.number().int().nonnegative(),
@@ -231,7 +232,7 @@ export async function POST(request: Request) {
       chatId,
       attachments: payload.attachments,
     });
-    const hydratedAttachments = await hydrateAttachmentsWithSignedUrls(validatedAttachments);
+    const hydratedAttachments = await hydrateAttachmentsWithDownloadUrls(validatedAttachments);
 
     const userMessageId = await appendMessage({
       chatId,

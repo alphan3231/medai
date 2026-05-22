@@ -67,10 +67,11 @@ export function describeAttachmentKind(kind: ChatAttachmentKind, language: AppLa
   return language === "tr" ? "Belirti fotoğrafı" : "Symptom photo";
 }
 
-export function stripAttachmentRenderUrls(attachments: ChatAttachment[]) {
+export function serializeChatAttachments(attachments: ChatAttachment[]) {
   return attachments.map((attachment) => ({
     id: attachment.id,
     storagePath: attachment.storagePath,
+    downloadUrl: attachment.downloadUrl ?? null,
     mimeType: attachment.mimeType,
     fileName: attachment.fileName,
     sizeBytes: attachment.sizeBytes,

@@ -13,7 +13,7 @@ import {
 } from "react";
 import type { User } from "firebase/auth";
 import { signOut } from "firebase/auth";
-import { deleteObject, ref, uploadBytesResumable, type UploadTask } from "firebase/storage";
+import { deleteObject, getDownloadURL, ref, uploadBytesResumable, type UploadTask } from "firebase/storage";
 import {
   AlertTriangle,
   ImagePlus,
@@ -485,6 +485,7 @@ export function ChatShell({
       .map<ChatAttachment>((attachment) => ({
         id: attachment.id,
         storagePath: attachment.storagePath,
+        downloadUrl: attachment.downloadUrl,
         mimeType: attachment.mimeType,
         fileName: attachment.fileName,
         sizeBytes: attachment.sizeBytes,
@@ -774,18 +775,34 @@ export function ChatShell({
             ),
           );
         },
-        () => {
-          setComposerAttachments((current) =>
-            current.map((attachment) =>
-              attachment.id === attachmentId
-                ? {
-                    ...attachment,
-                    progress: 100,
-                    status: "ready",
-                  }
-                : attachment,
-            ),
-          );
+        async () => {
+          try {
+            const downloadUrl = await getDownloadURL(storageTask.snapshot.ref);
+            setComposerAttachments((current) =>
+              current.map((attachment) =>
+                attachment.id === attachmentId
+                  ? {
+                      ...attachment,
+                      downloadUrl,
+                      progress: 100,
+                      status: "ready",
+                    }
+                  : attachment,
+              ),
+            );
+          } catch {
+            setComposerAttachments((current) =>
+              current.map((attachment) =>
+                attachment.id === attachmentId
+                  ? {
+                      ...attachment,
+                      status: "error",
+                      errorMessage: t.attachmentUploadError,
+                    }
+                  : attachment,
+              ),
+            );
+          }
         },
       );
     }
